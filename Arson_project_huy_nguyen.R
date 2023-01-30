@@ -66,15 +66,15 @@ library(ggsignif)
 # - month (02) year (20) station (009) octane (91)
 # Anything with a D at end is diesel and the composites are equal mixture of a fuel type, for example, GasComp is 
 # made by mixing equally all Gas sample from different gas stations. 
-
-workflow_excel <- read_xlsx(path = paste0(getwd(), "/Workflow-Arson-paper-19082022.xlsx"))
-kable_workflow_excel <- knitr::kable(workflow_excel, align = "c",
-                                     caption = "Workflow")
-
-
-kable_workflow_excel <- kableExtra::kable_classic(kable_workflow_excel, html_font = "calibri")
-
-kable_workflow_excel
+# 
+# workflow_excel <- read_xlsx(path = paste0(getwd(), "/Workflow-Arson-paper-19082022.xlsx"))
+# kable_workflow_excel <- knitr::kable(workflow_excel, align = "c",
+#                                      caption = "Workflow")
+# 
+# 
+# kable_workflow_excel <- kableExtra::kable_classic(kable_workflow_excel, html_font = "calibri")
+# 
+# kable_workflow_excel
 
 # Functions -------------------------------------------------------------------------------------------------------
 # Filtering matched compound names
@@ -360,39 +360,12 @@ RlaPlots <- function(inputdata, type=c("ag", "wg"), cols=NULL,
 
 
 # STEP 1.1: Data import --------------------------------------------
+setwd("C:/Users/huyng/Desktop/Huy Nguyen/PhD_EnSciMan_Ryerson_University/Arson project/Rproject/data")
+
 file_list <- list.files(pattern = '*.xlsx')
 
 # Pipe operator for isolating IL types
-indi_IL_file_list <- file_list %>%
-  .[!str_ends(., "check.xlsx")] %>%
-  .[!str_detect(., "grouping_compounds")] %>%
-  .[!str_detect(., "Station")] %>%
-  .[!str_detect(., "Workflow")] %>%
-  .[!str_detect(., "ASTM")] %>%
-  .[!str_detect(., "data_table")]
-
-gas_only_file_list <- file_list %>%
-  .[!str_detect(., "D")]  %>%
-  .[!str_detect(., "DieselComp")] %>%
-  .[!str_detect(., "GasComp")] %>%
-  .[!str_ends(., "check.xlsx")] %>%
-  .[!str_detect(., "grouping_compounds")] %>%
-  .[!str_detect(., "Station")] %>%
-  .[!str_detect(., "Workflow")] %>%
-  .[!str_detect(., "ASTM")] %>%
-  .[!str_detect(., "data_table")]
-
-non_gas_file_list <- file_list[!file_list %in% gas_only_file_list] %>%
-  .[!str_ends(., "check.xlsx")] %>%
-  .[!str_detect(., "grouping_compounds")] %>%
-  .[!str_detect(., "Station")] %>%
-  .[!str_detect(., "Workflow")] %>%
-  .[!str_detect(., "ASTM")] %>%
-  .[!str_detect(., "data_table")]
-
-gas_diesel_only_file_list <- file_list %>%
-  .[!str_detect(., "DieselComp")] %>%
-  .[!str_detect(., "GasComp")] %>%
+ILR_file_list <- file_list %>%
   .[!str_ends(., "check.xlsx")] %>%
   .[!str_detect(., "grouping_compounds")] %>%
   .[!str_detect(., "Station")] %>%
@@ -402,20 +375,19 @@ gas_diesel_only_file_list <- file_list %>%
 
 
 # Import IL samples to list
-df_list_step1.1 <- purrr::map(indi_IL_file_list, read_xlsx, sheet = "Results")
+df_list_step1.1 <- purrr::map(ILR_file_list, read_xlsx,
+                              sheet = "Results")
 
 df_step1.1 <- dplyr::bind_rows(df_list_step1.1)
 
-# remove spaces in column names 
-for (i in 1:length(df_list)) {
-  colnames(df_list[[i]]) <- gsub(" ", "", colnames(df_list[[i]]))
+# remove spaces in column names in df_list_step1.1
+for (i in 1:length(df_list_step1.1)) {
+  colnames(df_list_step1.1[[i]]) <- gsub(" ", "", colnames(df_list_step1.1[[i]]))
   }
 
-# ASTM compound list
-ASTM_list <- read_xlsx(paste0(getwd(), "/ASTM Compound List_RT Times for ILR 0220_HN_edited (version 2).xlsx"), sheet = "Sheet1")
 
 # STEP 1.2A: Filtering out column bleed, solvent and BTEX and minimum area observations--------------------------------------
-df_list_step1.2 <- purrr::map(df_list_step1.1, filtering, filter_list = c("^Carbon disulfide$", 
+df_step1.2 <- purrr::map(df_list_step1.1, filtering, filter_list = c("^Carbon disulfide$", 
                                                                 "Cyclotrisiloxane..hexamethyl",
                                                                 "Cyclotetrasiloxane..octamethyl",
                                                                 "^Benzene$",
@@ -501,8 +473,8 @@ grid.arrange(grobs = plot_b, ncol = 5,
              bottom = "Threshold of removal for limit observations")
 
 # STEP 1.2B Filtering out limit of observations----------------------------
-list_remaining_area <- limit_obser(df_list_step1.2, indi_IL_file_list, cap = 50000)[[1]]
-list_removed_area <- limit_obser(df_list_step1.2, indi_IL_file_list, cap = 50000)[[2]]
+list_remaining_area <- limit_obser(df_step1.2, ILR_file_list, cap = 50000)[[1]]
+list_removed_area <- limit_obser(df_step1.2, ILR_file_list, cap = 50000)[[2]]
 
 # QUALITY CONTROL C (CONFIRMATION) OF STEP 1.2B: -----------------------
 ## Plotting post-removal data distribution
@@ -543,7 +515,7 @@ ggplot(data = df_both) +
 # STEP 1.3: Grouping compounds based on RT1, RT2, Ion1 -----------------------------------------------------------------------
 # STEP 1.3A: Generate 1 grand data frame of all 31 IL samples
 
-df_list_step1.3 <- bind_rows(list_remaining_area) %>%
+df_step1.3 <- bind_rows(list_remaining_area) %>%
   arrange(RT1, RT2)
 
 # Remove all special character in Compound column =============================
@@ -793,7 +765,7 @@ for (i in 1:length(list_remaining_area)) {
 # => VERY BAD!! shuffle 100 times and resulting in different compound number every iteration
 number_collapsedcomp <- c()
 for (i in 1:100) {
-  shuffled_df <- all_data_pre_norm_filter_area[base::sample(1:nrow(all_data_pre_norm_filter_area)), ]
+  shuffled_df <- df_step1.3[base::sample(1:nrow(df_step1.3)), ]
   
   collapsed_shuffled_df <- grouping_comp_ver1(shuffled_df,
                                     rt1thres = 0.2,
@@ -805,17 +777,17 @@ for (i in 1:100) {
 }
 
 
-all_data_pre_norm_grouped_filter_area_rt10.1 <- grouping_comp_ver1(all_data_pre_norm_filter_area,
-                                                            rt1thres = 0.1, # rt1thres = 0.2
-                                                            rt2thres = 0.125,
-                                                            ion1thres = 0.05, # Ion 1 and 2 indicates molecular structure (2 most prevalent mass-to-charge)
-                                                            ion2thres = 0.05) 
+# all_data_pre_norm_grouped_filter_area_rt10.1 <- grouping_comp_ver1(df_step1.3,
+#                                                             rt1thres = 0.1, # rt1thres = 0.2
+#                                                             rt2thres = 0.125,
+#                                                             ion1thres = 0.05, # Ion 1 and 2 indicates molecular structure (2 most prevalent mass-to-charge)
+#                                                             ion2thres = 0.05) 
 
-all_data_pre_norm_grouped_filter_area_rt10.2 <- grouping_comp_ver1(all_data_pre_norm_filter_area,
-                                                                    rt1thres = 0.2, # rt1thres = 0.2
-                                                                    rt2thres = 0.125,
-                                                                    ion1thres = 0.05, # Ion 1 and 2 indicates molecular structure (2 most prevalent mass-to-charge)
-                                                                    ion2thres = 0.05)
+df_step1.3_rt10.2 <- grouping_comp_ver1(df_step1.3,
+                                        rt1thres = 0.2,
+                                        rt2thres = 0.125,
+                                        ion1thres = 0.05, # Ion 1 and 2 indicates molecular structure (2 most prevalent mass-to-charge)
+                                        ion2thres = 0.05)
 
 # STEP 1.4: Quality CONTROL WITH ASTM target compound list
 # Question 1: Are the ASTM compound grouped as the same "Compound_X."? 
@@ -831,19 +803,19 @@ all_data_pre_norm_grouped_filter_area_rt10.2 <- grouping_comp_ver1(all_data_pre_
 
 
 # STEP 2: Identify shared and unique compound groups across samples ------------------------------------------------
-idx_list_filter_area_samples_rt10.2 <- comp_filter_ver1(all_data_pre_norm_grouped_filter_area_rt10.2, 
-                                                 length(indi_IL_file_list))
+idx_list_filter_area_samples_rt10.2 <- comp_filter_ver1(df_step1.3_rt10.2, 
+                                                 length(ILR_file_list))
 
-idx_list_filter_area_samples_rt10.1 <- comp_filter_ver1(all_data_pre_norm_grouped_filter_area_rt10.1, 
-                                                 length(indi_IL_file_list))
+similar_compounds_filter_area_samples_rt10.2 <- df_step1.3_rt10.2[idx_list_filter_area_samples_rt10.2[[1]],] 
+other_compounds_filter_area_samples_rt10.2 <- df_step1.3_rt10.2[idx_list_filter_area_samples_rt10.2[[2]],] 
+unique_compounds_filter_area_samples_rt10.2 <- df_step1.3_rt10.2[idx_list_filter_area_samples_rt10.2[[3]],]
 
-similar_compounds_filter_area_samples_rt10.2 <- all_data_pre_norm_grouped_filter_area_rt10.2[idx_list_filter_area_samples_rt10.2[[1]],] 
-other_compounds_filter_area_samples_rt10.2 <- all_data_pre_norm_grouped_filter_area_rt10.2[idx_list_filter_area_samples_rt10.2[[2]],] 
-unique_compounds_filter_area_samples_rt10.2 <- all_data_pre_norm_grouped_filter_area_rt10.2[idx_list_filter_area_samples_rt10.2[[3]],]
-
-similar_compounds_filter_area_samples_rt10.1 <- all_data_pre_norm_grouped_filter_area_rt10.1[idx_list_filter_area_samples_rt10.1[[1]],] 
-other_compounds_filter_area_samples_rt10.1 <- all_data_pre_norm_grouped_filter_area_rt10.1[idx_list_filter_area_samples_rt10.1[[2]],] 
-unique_compounds_filter_area_samples_rt10.1 <- all_data_pre_norm_grouped_filter_area_rt10.1[idx_list_filter_area_samples_rt10.1[[3]],]
+# idx_list_filter_area_samples_rt10.1 <- comp_filter_ver1(all_data_pre_norm_grouped_filter_area_rt10.1, 
+#                                                         length(indi_IL_file_list))
+# 
+# similar_compounds_filter_area_samples_rt10.1 <- all_data_pre_norm_grouped_filter_area_rt10.1[idx_list_filter_area_samples_rt10.1[[1]],] 
+# other_compounds_filter_area_samples_rt10.1 <- all_data_pre_norm_grouped_filter_area_rt10.1[idx_list_filter_area_samples_rt10.1[[2]],] 
+# unique_compounds_filter_area_samples_rt10.1 <- all_data_pre_norm_grouped_filter_area_rt10.1[idx_list_filter_area_samples_rt10.1[[3]],]
 
 # Distinguishing gas stations
 # idx_list_filter_area_stations <- comp_filter_ver2(all_data_pre_norm_grouped_filter_area, 
@@ -860,7 +832,7 @@ unique_compounds_filter_area_samples_rt10.1 <- all_data_pre_norm_grouped_filter_
 
 # Combine similar_compounds_filter_area and other_compounds_filter_area to one data frame 
 shared_comp_sample_rt10.2 <- bind_rows(similar_compounds_filter_area_samples_rt10.2, other_compounds_filter_area_samples_rt10.2)
-shared_comp_sample_rt10.1 <- bind_rows(similar_compounds_filter_area_samples_rt10.1, other_compounds_filter_area_samples_rt10.1)
+# shared_comp_sample_rt10.1 <- bind_rows(similar_compounds_filter_area_samples_rt10.1, other_compounds_filter_area_samples_rt10.1)
 
 # Histogram of Area distribution of each sample/ gas_station/ fuel_type -------------------------
 ggplot(data = shared_comp_samples,
@@ -890,7 +862,7 @@ ggplot(data = shared_comp_samples,
 #   theme(text = element_text(size = 20),
 #         axis.text.x = element_text(angle = 90, vjust = 0.5))
 
-# STEP 3: Choosing Data Normalization ================================================================================
+# STEP 3: Data Normalization ================================================================================
 # Plotting data distribution pre-removal -----------------------------------
 data_plot_pre_removal <- list() 
 i <- 1
@@ -930,7 +902,7 @@ add_data_normalization <- function(data) {
   return(newdata)
 }
 
-shared_comp_normalized <- add_data_normalization(shared_comp_samples)
+shared_comp_normalized <- add_data_normalization(shared_comp_sample_rt10.2)
 
 # to extract normalized values of similar compounds from shared_comp
 # similar_compounds_normalized_idx <- c()

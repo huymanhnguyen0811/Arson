@@ -2,7 +2,7 @@
 `%notin%` <- Negate(`%in%`)
 
 # Research Question 1
-mydata <- shared_comp_normalized %>%
+stats_rq1 <- shared_comp_normalized %>%
   filter(., fuel_type %in% c("Gas", "Diesel")) %>%
   select(sample_name, collapsed_compound, Percent_Area) %>%
   mutate(sample_name = factor(sample_name, levels = c(unique(sample_name)))) %>%
@@ -16,9 +16,7 @@ mydata <- shared_comp_normalized %>%
 
 # category 1: Compound with no diesel records, how we determine the significant compounds ------------------------------
 # How many compounds has no diesel records? -> 1137 out of 4769 compounds 
-cat_1 <- mydata_ASTM[rowSums(is.na(mydata_ASTM[, c(22:25)])) == 4,] # BEWARE: these compounds may only appear in 2 gas samples
-
-length(unique(cat_1$collapsed_compound))
+cat_1 <- stats_rq1[rowSums(is.na(stats_rq1[, c(22:25)])) == 4,] # BEWARE: these compounds may only appear in 2 gas samples
 
 # Boxplot distribution of these compounds - choose compounds that has > 2 data points for Gas --------
 # cat_1_boxplot_dat <-  shared_comp_normalized %>% 
@@ -41,18 +39,16 @@ length(unique(cat_1$collapsed_compound))
 
 # category 2: Compound with no gas records, how we determine the significant compounds ---------------------------------
 # How many compounds has no diesel records? -> 2812 out of 4769 compounds 
-cat_2 <- mydata_ASTM[rowSums(is.na(mydata_ASTM[, c(1:21)])) == 21,] 
-
-length(unique(cat_2$collapsed_compound))
+cat_2 <- stats_rq1[rowSums(is.na(stats_rq1[, c(1:21)])) == 21,] 
 
 # category 3: Compound with >= 1 Gas record and only 1 diesel record, how we determine the significant compounds ---------------------------
 # How many compounds has no diesel records? -> 345 out of 4769 compounds 
-cat_3 <- mydata_ASTM[(rowSums(is.na(mydata_ASTM[, 22:25])) == 3) &  # only 1 Diesel record
-                       (rowSums(!is.na(mydata_ASTM[, 1:21])) >= 1),] # only 1 Gas record
+cat_3 <- stats_rq1[(rowSums(is.na(stats_rq1[, 22:25])) == 3) &  # only 1 Diesel record
+                       (rowSums(!is.na(stats_rq1[, 1:21])) >= 1),] # only 1 Gas record
 
 # category 4: only 1 Gas and >=2 Diesel --------------------------------------------------------
-cat_4 <- mydata_ASTM[(rowSums(!is.na(mydata_ASTM[, 1:21])) == 1) & 
-                       (rowSums(!is.na(mydata_ASTM[, 22:25])) >= 2),] # -> 101 out of 4769 compounds
+cat_4 <- stats_rq1[(rowSums(!is.na(stats_rq1[, 1:21])) == 1) & 
+                       (rowSums(!is.na(stats_rq1[, 22:25])) >= 2),] # -> 101 out of 4769 compounds
 
 dim(cat_4)
 rownames(cat_4) <- NULL
@@ -100,9 +96,8 @@ rownames(cat_4) <- NULL
 # 
 
 # category 5: >=2 gas and >=2 diesel (multiple testing) --------------------------------------------------------
-cat_5 <- mydata[(rowSums(!is.na(mydata[, 1:21])) >= 2) & 
-                       (rowSums(!is.na(mydata[, 22:25])) >= 2),] # -> 374 out of 4769 compounds
-
+cat_5 <- stats_rq1[(rowSums(!is.na(stats_rq1[, 1:21])) >= 2) & 
+                       (rowSums(!is.na(stats_rq1[, 22:25])) >= 2),] # -> 374 out of 4769 compounds
 
 for (r in 1:nrow(cat_5)) { 
   cat_5[r, which(base::is.na(cat_5[r,]))] <- runif(length(which(base::is.na(cat_5[r,]))),
@@ -110,28 +105,41 @@ for (r in 1:nrow(cat_5)) {
                                                        max = sort(shared_comp_normalized$Percent_Area)[2])
 }
 
+# Data frame without any NA - 29 out of 4769 compounds
+cat5_no_NA_impute <- stats_rq1[(rowSums(!is.na(stats_rq1[, 1:21])) >= 21) & 
+                                 (rowSums(!is.na(stats_rq1[, 22:25])) >= 4),] 
+  
 # Wilcoxon Test ========================================================================================
 # !! vary sample size gene/compound dataset, three solutions: exact wilcoxon, permutation test, SAM (stanford)
 
 pvalue.w <- c()
 
-for (i in 1:nrow(cat_5)) {
+for (i in 1:nrow(cat_5)) { 
   pvalue.w[i] <- wilcox.test(as.numeric(cat_5[i, c(1:21)]), as.numeric(cat_5[i, c(22:25)]))$p.value
 }
 
 length(pvalue.w) # 374 wilcoxon tests was done
 
-summary_table <- cbind((cat_5 %>% rownames_to_column(., var = "collapsed_compound"))$collapsed_compound, 
-                       as.data.frame(stats::p.adjust(pvalue.w,
-                                                     method = "holm"))) %>% # default for p.adjust() method is Holm
-  arrange(p.adjust(pvalue.w))# arrange p value by ascending order, smallest p value is 0.0519 > alpha1 (= 0.05)
+summary_table <- cbind(rownames(cat_5), as.data.frame(pvalue.w))
+colnames(summary_table) <- c("collapsed_compound", "pvalue")
 
-colnames(summary_table) <- c("collapsed_compound", "adjusted_pvalue")
+summary_table$adjusted_pvalue_holm <- stats::p.adjust(summary_table$pvalue, method = "holm")
+summary_table$adjusted_pvalue_hochberg <- stats::p.adjust(summary_table$pvalue, method = "hochberg")
+summary_table$adjusted_pvalue_hommel <- stats::p.adjust(summary_table$pvalue, method = "hommel")
+summary_table$adjusted_pvalue_bonferroni <- stats::p.adjust(summary_table$pvalue, method = "bonferroni")
+summary_table$adjusted_pvalue_BH <- stats::p.adjust(summary_table$pvalue, method = "BH")
+summary_table$adjusted_pvalue_BY <- stats::p.adjust(summary_table$pvalue, method = "BY")
+summary_table$adjusted_pvalue_fdr <- stats::p.adjust(summary_table$pvalue, method = "fdr")
 
-alpha0.05 <- summary_table %>% filter(., adjusted_pvalue < 0.05) # NO compounds has adjusted pvalue < 0.05
-alpha0.1 <- summary_table %>% filter(., adjusted_pvalue < 0.1) # 118 compounds
+alpha0.05 <- summary_table %>% # default for p.adjust() method is Holm
+  arrange(pvalue) %>% # arrange p value by ascending order, smallest p value is 0.0519 > alpha1 (= 0.05)
+  filter(., pvalue < 0.05) # NO compounds has adjusted pvalue < 0.05
 
-# RQ1 Beyond_ASTM data frame that pass Wilcoxon alpha 0.1 --------------------
+alpha0.1 <- summary_table %>%
+  arrange(adjusted_pvalue_holm) %>% 
+  filter(., adjusted_pvalue_holm < 0.1) # 118 compounds
+
+# RQ1 Beyond_ASTM data frame that significant Wilcoxon alpha 0.1 --------------------
 idx <- which(str_detect(ASTM_list$`RQ1: Category 5: Compounds with >=2 Gas record and >=2 Diesel record, PASS WILCOXON TEST (data imputed with LOD), alpha threshold < 0.1 (rt1thres = 0.2)`, 
                         "x"))
 
@@ -143,9 +151,10 @@ beyond_ASTM_rq1_cat5_wilcox_alpha0.1_names <- unique((alpha0.1 %>%
   filter(., collapsed_compound %notin% ASTM_rq1_cat5_wilcoxon_stats_alpha0.1))$collapsed_compound)
 
 beyond_ASTM_rq1_cat5_wilcox_alpha0.1_df <- shared_comp_normalized %>%
+  filter(., fuel_type %in% c("Gas", "Diesel")) %>%
   filter(., collapsed_compound %in% beyond_ASTM_rq1_cat5_wilcox_alpha0.1_names)
 
-beyond_ASTM_rq1_cat5_wilcox_alpha0.1_df <- beyond_ASTM_rq1_cat5_wilcox_alpha0.1_df[, -c(2,3, 6:8, 16:19)]
+# beyond_ASTM_rq1_cat5_wilcox_alpha0.1_df <- beyond_ASTM_rq1_cat5_wilcox_alpha0.1_df[, -c(2,3, 6:8, 16:19)]
 
 write_xlsx(beyond_ASTM_rq1_cat5_wilcox_alpha0.1_df, path = paste0(getwd(), "/RQ1_Beyond_ASTM_passed_Wilcoxon_alpha0.1.xlsx"))
 
@@ -230,17 +239,6 @@ transpose_mydata2_new <- transpose_mydata2 %>%
                                                           ifelse(str_detect(sample_name, "F008"), "Station_8", "Composite"))))))) %>%
   relocate(gas_station, .after = sample_name)
 
-# # Rearrange stations and sort to category 1 and category 2
-# move_to_last <- function(df, n) df[c(setdiff(seq_len(nrow(df)), n), n),]
-# 
-# for (station in unique(gas_stationdf$gas_station)) {
-#   name <- gas_stationdf[which(gas_stationdf$gas_station == station),]$sample_name
-#   station_idx <- which(transpose_mydata2$sample_name %in% name)
-#   transpose_mydata2 <- move_to_last(transpose_mydata2, station_idx)
-# }
-# 
-# rownames(transpose_mydata2) <- NULL
-
 # Category 1 (rq2_cat1) : Compound found in only 1 gas station and not in any other
 rq2_cat1 <- data.frame(matrix(nrow = nrow(transpose_mydata2_new)))
 # Category 2 (rq2_cat2): Compound found in >=2 gas stations
@@ -323,7 +321,7 @@ for (col in 1:ncol(rq2_cat2_stats)) {
 }
 
 
-rq2_cat2_stats <- base::cbind(rq2_cat2_stats, transpose_mydata2_new[, 1:2]) %>%
+rq2_cat2_stats_imputed <- base::cbind(rq2_cat2_stats, transpose_mydata2_new[, 1:2]) %>%
   relocate(sample_name, gas_station, .before = everything())
   
 # Wilcoxon exact test ------------------------
@@ -331,22 +329,23 @@ pvalue.w_rq2 <- c()
 
 # Compare between station 1,3,8 and 5,7,9
 i <- 1
-for (col in 3:ncol(rq2_cat2_stats)){
-  pvalue.w_rq2[i] <- wilcox.test(as.numeric(rq2_cat2_stats[which(rq2_cat2_stats$gas_station %in% c("Station_5", "Station_7", "Station_9")), col]), 
-                                 as.numeric(rq2_cat2_stats[which(rq2_cat2_stats$gas_station %in% c("Station_1", "Station_3", "Station_8")), col]))$p.value
+for (col in 3:ncol(rq2_cat2_stats_imputed)){
+  pvalue.w_rq2[i] <- wilcox.test(as.numeric(rq2_cat2_stats_imputed[which(rq2_cat2_stats_imputed$gas_station %in% c("Station_5", "Station_7", "Station_9")), col]), 
+                                 as.numeric(rq2_cat2_stats_imputed[which(rq2_cat2_stats_imputed$gas_station %in% c("Station_1", "Station_3", "Station_8")), col]))$p.value
   i <- i + 1
 }
 
 # length(pvalue.w_rq2) # 506 wilcoxon tests was done
 
-rq2_cat2_summary_table <- cbind(colnames(rq2_cat2_stats[,3:ncol(rq2_cat2_stats)]), as.data.frame(stats::p.adjust(pvalue.w_rq2,
-                                                                               method = "holm"))) %>% # default for p.adjust() method is Holm
+rq2_cat2_summary_table <- cbind(colnames(rq2_cat2_stats_imputed[,3:ncol(rq2_cat2_stats_imputed)]), 
+                                as.data.frame(stats::p.adjust(pvalue.w_rq2,
+                                                              method = "holm"))) %>% # default for p.adjust() method is Holm
   arrange(p.adjust(pvalue.w_rq2))# arrange p value by ascending order, smallest p value is 0.0519 > alpha1 (= 0.05)
 
 colnames(rq2_cat2_summary_table) <- c("collapsed_compound", "adjusted_pvalue")
 
-rq2_cat2_alpha0.05 <- rq2_cat2_summary_table %>% filter(., adjusted_pvalue < 0.05) # 61 compounds
-rq2_cat2_alpha0.1 <- rq2_cat2_summary_table %>% filter(., adjusted_pvalue < 0.1) # 71 compounds
+rq2_cat2_alpha0.05 <- rq2_cat2_summary_table %>% filter(., adjusted_pvalue < 0.05) # 61 compounds statistically significant
+rq2_cat2_alpha0.1 <- rq2_cat2_summary_table %>% filter(., adjusted_pvalue < 0.1) # 71 compounds statistically significant0
 
 # rq2_cat2_alpha0.05 -> Which compounds among 61 compounds are ASTM compounds?
 View(shared_comp_normalized %>%
