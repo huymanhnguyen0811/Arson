@@ -35,6 +35,15 @@ metadata_X_rq1 <- move_to_last(metadata_X_rq1, 2)
 metadata_X_rq1 <- move_to_last(metadata_X_rq1, 7)
 metadata_X_rq1 <- move_to_last(metadata_X_rq1, 21)
 
+cat_5 <- stats_rq1[(rowSums(!is.na(stats_rq1[, 1:21])) >= 2) & 
+                     (rowSums(!is.na(stats_rq1[, 22:25])) >= 2),] # -> 374 out of 4769 compounds
+
+for (r in 1:nrow(cat_5)) { 
+  cat_5[r, which(base::is.na(cat_5[r,]))] <- runif(length(which(base::is.na(cat_5[r,]))),
+                                                   min = sort(shared_comp_normalized$Percent_Area)[1],
+                                                   max = sort(shared_comp_normalized$Percent_Area)[2])
+}
+
 all(colnames(cat_5) == rownames(metadata_X_rq1))
 
 # Conduct principal component analysis (PCA): ---------------------------------

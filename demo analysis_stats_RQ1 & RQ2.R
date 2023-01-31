@@ -155,7 +155,6 @@ beyond_ASTM_rq1_cat5_wilcox_alpha0.1_df <- shared_comp_normalized %>%
   filter(., collapsed_compound %in% beyond_ASTM_rq1_cat5_wilcox_alpha0.1_names)
 
 # beyond_ASTM_rq1_cat5_wilcox_alpha0.1_df <- beyond_ASTM_rq1_cat5_wilcox_alpha0.1_df[, -c(2,3, 6:8, 16:19)]
-
 write_xlsx(beyond_ASTM_rq1_cat5_wilcox_alpha0.1_df, path = paste0(getwd(), "/RQ1_Beyond_ASTM_passed_Wilcoxon_alpha0.1.xlsx"))
 
 # Which compounds among 118 compounds are ASTM compounds? - 21 out of 80 ASTM found ---------
@@ -205,6 +204,7 @@ for (comp in ASTM_alpha0.1) {
   alpha0.1[alpha0.1$collapsed_compound == comp,]$RT2max <- base::sort(temp$RT2, decreasing = TRUE)[1]
   
 }
+
 
 # Research Question 2 ---------------
 mydata2 <- shared_comp_normalized %>%
@@ -335,7 +335,7 @@ for (col in 3:ncol(rq2_cat2_stats_imputed)){
   i <- i + 1
 }
 
-# length(pvalue.w_rq2) # 506 wilcoxon tests was done
+length(pvalue.w_rq2) # 506 wilcoxon tests was done
 
 rq2_cat2_summary_table <- cbind(colnames(rq2_cat2_stats_imputed[,3:ncol(rq2_cat2_stats_imputed)]), 
                                 as.data.frame(stats::p.adjust(pvalue.w_rq2,
