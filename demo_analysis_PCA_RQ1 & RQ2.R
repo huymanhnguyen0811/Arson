@@ -57,23 +57,30 @@ df_pca_rq1_rt10.2 <- df_pca_rq1(shared_comp_normalized_rt10.2)
 df_pca_rq1_rt10.3 <- df_pca_rq1(shared_comp_normalized_rt10.3)
 
 # Conduct principal component analysis (PCA):
-p_rq1_rt10.1 <- pca(mat = df_pca_rq1_rt10.1[[1]], metadata = df_pca_rq1_rt10.1[[2]]) # Classify on sample
+colnames(df_pca_rq1_rt10.1[[2]]) <- c("Fuel type", "Gas Stations")
+colnames(df_pca_rq1_rt10.2[[2]]) <- c("Fuel type", "Gas Stations")
+colnames(df_pca_rq1_rt10.3[[2]]) <- c("Fuel type", "Gas Stations")
+
+p_rq1_rt10.1 <- pca(mat = df_pca_rq1_rt10.1[[1]], metadata = df_pca_rq1_rt10.1[[2]])
 p_rq1_rt10.2 <- pca(mat = df_pca_rq1_rt10.2[[1]], metadata = df_pca_rq1_rt10.2[[2]])
 p_rq1_rt10.3 <- pca(mat = df_pca_rq1_rt10.3[[1]], metadata = df_pca_rq1_rt10.3[[2]])
 
+
+
 # A bi-plot
-biplot(p_rq1_rt10.3,
-       lab = row.names(p_rq1_rt10.3$metadata),
-       colby = 'fuel_type',
-       hline = 0, vline = 0,
-       legendPosition = 'right', labSize = 5,
-       sizeLoadingsNames = 5,
-       showLoadings = TRUE,
-       ntopLoadings = 10,
-       pointSize = 4, 
-       legendLabSize = 15,
-       legendTitleSize = 16,
-       legendIconSize = 6)
+PCAtools::biplot(p_rq1_rt10.3,
+                 lab = NULL, # #row.names(p_rq1_rt10.2$metadata)
+                 colby = 'Fuel type',
+                 hline = 0, vline = 0,
+                 legendPosition = 'right', labSize = 5,
+                 sizeLoadingsNames = 5,
+                 showLoadings = TRUE,
+                 # showLoadingsNames = FALSE,
+                 ntopLoadings = 10,
+                 pointSize = 4, 
+                 legendLabSize = 15,
+                 legendTitleSize = 16,
+                 legendIconSize = 6)
 
 # Retrieve compound name of top 100 loading
 loadingS_rq1_sorted <- p_rq1$loadings %>% arrange(PC1, PC2)
@@ -263,18 +270,25 @@ df_pca_rq2_rt10.2 <- df_pca_rq2(shared_comp_normalized_rt10.2)
 df_pca_rq2_rt10.3 <- df_pca_rq2(shared_comp_normalized_rt10.3)
 
 # Conduct principal component analysis (PCA):
+# Give a better column name for pretty biplot later on
+colnames(df_pca_rq2_rt10.1[[2]]) <- c("Gas Stations")
+colnames(df_pca_rq2_rt10.2[[2]]) <- c("Gas Stations")
+colnames(df_pca_rq2_rt10.3[[2]]) <- c("Gas Stations")
+
 p_rq2_rt10.1 <- pca(mat = df_pca_rq2_rt10.1[[1]], metadata = df_pca_rq2_rt10.1[[2]])
 p_rq2_rt10.2 <- pca(mat = df_pca_rq2_rt10.2[[1]], metadata = df_pca_rq2_rt10.2[[2]])
 p_rq2_rt10.3 <- pca(mat = df_pca_rq2_rt10.3[[1]], metadata = df_pca_rq2_rt10.3[[2]])
 
 # A bi-plot
-biplot(p_rq2_rt10.1,
-       lab = row.names(p_rq2_rt10.1$metadata),
-       colby = 'gas_station',
+biplot(p_rq2_rt10.3,
+       lab = NULL, #row.names(p_rq2_rt10.1$metadata),
+       colby = 'Gas Stations',
        hline = 0, vline = 0,
        legendPosition = 'right',labSize = 5,
        sizeLoadingsNames = 5,
        showLoadings = TRUE,
+       # showLoadingsNames = FALSE,
+       ntopLoadings = 8,
        pointSize = 4, 
        legendLabSize = 15,
        legendTitleSize = 16,

@@ -40,19 +40,82 @@ bubble_plot_rq1 <- function(df) {
 }
 
 # Research Question 1: Gas vs. Diesel -------------------------------------------------------
-rq1_statsPCA_inputdf <- shared_comp_normalized %>%
-  filter(., fuel_type %in% c("Gas", "Diesel")) %>%
-  filter(., collapsed_compound %in% rownames(cat_5))
+# rq1_statsPCA_inputdf <- shared_comp_normalized_rt10.2 %>%
+#   filter(., fuel_type %in% c("Gas", "Diesel")) %>%
+#   filter(., collapsed_compound %in% rownames(df_pca_rq1_rt10.2[[1]]))
   
-rq1_significant_wilcox_df <- shared_comp_normalized %>%
-  filter(., fuel_type %in% c("Gas", "Diesel")) %>%
-  filter(., collapsed_compound %in% alpha0.05$collapsed_compound)
+# Gas significant ------------------
+rq1_gas_significant <- cat_5[,1:21] %>% 
+  mutate(area = rowMeans(select(., 1:21))) %>% 
+  rownames_to_column(., var = "collapsed_compound") %>%
+  relocate(area, .after = collapsed_compound) %>%
+  select(., 1:2) %>%
+  filter(., collapsed_compound %in% rq1_alpha0.1$collapsed_compound)
 
-rq1_toploading_pca <- shared_comp_normalized %>%
-  filter(., fuel_type %in% c("Gas", "Diesel")) %>%
-  filter(., collapsed_compound %in% toploadings_rq1)
+rq1_gas_significant_rt <- shared_comp_normalized_rt10.1 %>%
+  filter(., fuel_type == "Gas") %>%
+  filter(., collapsed_compound %in% rq1_alpha0.1$collapsed_compound) %>%
+  group_by(collapsed_compound) %>%
+  summarise(rt1 = mean(RT1), 
+            rt2 = mean(RT2))
 
-rq1_nonsignificant_wilcox_df <- setdiff(rq1_statsPCA_inputdf, rq1_significant_wilcox_df)
+rq1_gas_significant <- dplyr::right_join(rq1_gas_significant_rt, rq1_gas_significant, by = "collapsed_compound")
+
+# Diesel significant -----------
+rq1_diesel_significant <- cat_5[,22:25] %>% 
+  mutate(area = rowMeans(select(., 1:4))) %>% 
+  rownames_to_column(., var = "collapsed_compound") %>%
+  relocate(area, .after = collapsed_compound) %>%
+  select(., 1:2) %>%
+  filter(., collapsed_compound %in% rq1_alpha0.1$collapsed_compound)
+
+rq1_diesel_significant_rt <- shared_comp_normalized_rt10.1 %>%
+  filter(., fuel_type == "Diesel") %>%
+  filter(., collapsed_compound %in% rq1_alpha0.1$collapsed_compound) %>%
+  group_by(collapsed_compound) %>%
+  summarise(rt1 = mean(RT1), 
+            rt2 = mean(RT2))
+
+rq1_diesel_significant <- dplyr::right_join(rq1_diesel_significant_rt, rq1_diesel_significant, by = "collapsed_compound")
+
+# Top PCA loadings
+# rq1_toploading_pca <- shared_comp_normalized %>%
+#   filter(., fuel_type %in% c("Gas", "Diesel")) %>%
+#   filter(., collapsed_compound %in% toploadings_rq1)
+
+###### Gas Non-significant ----------------
+rq1_gas_nonsignificant <- cat_5[,1:21] %>% 
+  mutate(area = rowMeans(select(., 1:21))) %>% 
+  rownames_to_column(., var = "collapsed_compound") %>%
+  relocate(area, .after = collapsed_compound) %>%
+  select(., 1:2) %>%
+  filter(., collapsed_compound %notin% alpha0.1$collapsed_compound)
+
+rq1_gas_nonsignificant_rt <- shared_comp_normalized_rt10.2 %>%
+  filter(., fuel_type == "Gas") %>%
+  filter(., collapsed_compound %in% rq1_gas_nonsignificant$collapsed_compound) %>%
+  group_by(collapsed_compound) %>%
+  summarise(rt1 = mean(RT1), 
+            rt2 = mean(RT2))
+
+rq1_gas_nonsignificant <- dplyr::right_join(rq1_gas_nonsignificant_rt, rq1_gas_nonsignificant, by = "collapsed_compound")
+
+###### Diesel Non-significant -------------
+rq1_diesel_nonsignificant <- cat_5[,22:25] %>% 
+  mutate(area = rowMeans(select(., 1:4))) %>% 
+  rownames_to_column(., var = "collapsed_compound") %>%
+  relocate(area, .after = collapsed_compound) %>%
+  select(., 1:2) %>%
+  filter(., collapsed_compound %notin% alpha0.1$collapsed_compound)
+
+rq1_diesel_nonsignificant_rt <- shared_comp_normalized_rt10.2 %>%
+  filter(., fuel_type == "Diesel") %>%
+  filter(., collapsed_compound %in% rq1_diesel_nonsignificant$collapsed_compound) %>%
+  group_by(collapsed_compound) %>%
+  summarise(rt1 = mean(RT1), 
+            rt2 = mean(RT2))
+
+rq1_diesel_nonsignificant <- dplyr::right_join(rq1_diesel_nonsignificant_rt, rq1_diesel_nonsignificant, by = "collapsed_compound")
 
 # ASTM_rq1_cat5_wilcox_alpha0.1_names <- unique((alpha0.1 %>%
 #                                                         filter(., collapsed_compound %in% ASTM_rq1_cat5_wilcoxon_stats_alpha0.1))$collapsed_compound)
@@ -63,29 +126,114 @@ rq1_nonsignificant_wilcox_df <- setdiff(rq1_statsPCA_inputdf, rq1_significant_wi
 # 
 # beyond_ASTM_rq1_cat5_wilcox_alpha0.1_df
 
-# Gas vs. Diesel - compounds that significant with Wilcoxon alpha0.1
-bubble_plot_rq1(rq1_significant_wilcox_df)
+# Gas vs. Diesel - compounds that significant with Wilcoxon alpha0.1---------------
+rq1_diesel_significant <- rq1_diesel_significant %>% mutate(., fuel_type = "Diesel")
+rq1_gas_significant <- rq1_gas_significant %>% mutate(., fuel_type = "Gas")
+rq1_sig <- rbind(rq1_diesel_significant, rq1_gas_significant)
 
-# Gas vs. Diesel - PCA top 100 loadings
+# Add ASTM group
+ASTM_group <- ASTM_list %>% filter(., !is.na(Group))
+
+for (group in unique(ASTM_group$Group)) {
+  minrt1 <- min(ASTM_group[ASTM_group$Group == group,]$RT1)
+  maxrt1 <- max(ASTM_group[ASTM_group$Group == group,]$RT1)
+  minrt2 <- min(ASTM_group[ASTM_group$Group == group,]$RT2)
+  maxrt2 <- max(ASTM_group[ASTM_group$Group == group,]$RT2)
+  idx <- which(rq1_sig$rt1 <= maxrt1 &
+                 rq1_sig$rt1 >= minrt1 &
+                 rq1_sig$rt2 <= maxrt2 &
+                 rq1_sig$rt2 >= minrt2)
+  rq1_sig[idx, "group"] <- group
+}
+
+colnames(rq1_sig) <- c("collapsed_compound", "Retention time 1", "Retention time 2", 
+                       "TSN-normalized area", "fuel_type", "Chemical Group")
+
+ggplot() +
+  geom_point(data = rq1_sig, aes(x = `Retention time 1`, y = `Retention time 2`,
+                                 size = `TSN-normalized area`, color = `Chemical Group`), pch = 21) +
+
+  # stat_ellipse() +
+  facet_grid(~fuel_type) +
+  scale_size(limits  = c(min(min(rq1_gas_significant$area), min(rq1_diesel_significant$area)), 
+                        max(max(rq1_gas_significant$area), max(rq1_diesel_significant$area))),
+             range = c(2,12)) +
+  guides(colour = guide_legend(override.aes = list(size=5))) +
+  theme_classic2(base_size = 20)
+
+# plot +geom_point(data = ASTM_F001A_aligned, pch = 4,
+#                  aes(x=RT1_aligned, y= RT2_aligned, colour = "red"))
+
+# Gas vs. Diesel - PCA top 100 loadings---------
 bubble_plot_rq1(rq1_toploading_pca)
 
-# Gas vs. Diesel - compounds that NOT significant with Wilcoxon alpha0.1
-bubble_plot_rq1(rq1_nonsignificant_wilcox_df) 
+# Gas vs. Diesel - compounds that NOT significant with Wilcoxon alpha0.1------------
+diesel_bubble_nonsf <- ggplot(data = rq1_diesel_nonsignificant  , aes(x = rt1, y = rt2, size = area)) +
+  geom_point(pch = 21) + 
+  scale_size(limits = c(min(min(rq1_gas_nonsignificant $area), min(rq1_diesel_nonsignificant$area)), 
+                        max(max(rq1_gas_nonsignificant $area), max(rq1_diesel_nonsignificant$area)))) +
+  scale_alpha(limits = c(min(min(rq1_gas_nonsignificant $area), min(rq1_diesel_nonsignificant$area)), 
+                         max(max(rq1_gas_nonsignificant $area), max(rq1_diesel_nonsignificant$area)))) +
+  theme(legend.position = "none") + 
+  ggtitle("Diesel_Non-significant")
+
+gas_bubble_nonsf <- ggplot(data = rq1_gas_nonsignificant , aes(x = rt1, y = rt2, size = area)) +
+  geom_point(pch = 21) + 
+  scale_size(limits = c(min(min(rq1_gas_nonsignificant $area), min(rq1_diesel_nonsignificant$area)), 
+                        max(max(rq1_gas_nonsignificant $area), max(rq1_diesel_nonsignificant$area)))) +
+  scale_alpha(limits = c(min(min(rq1_gas_nonsignificant $area), min(rq1_diesel_nonsignificant$area)), 
+                         max(max(rq1_gas_nonsignificant $area), max(rq1_diesel_nonsignificant$area)))) +
+  theme(legend.position = "none") + 
+  ggtitle("Gas_Non-significant")
+
+legend <- cowplot::get_legend(diesel_bubble_nonsf +
+                                theme(legend.position = "bottom"))
+
+grid.arrange(grobs = list(diesel_bubble_nonsf, gas_bubble_nonsf), ncol = 2, bottom = legend)
 
 # two bubble plots supposed to look the same but didn't... sth wrong with Wilcoxon tests!!!
-# ->> Investigate with histograms on values of cat_5 df
+# ->> Investigate with histograms on values of cat_5 df -------------
+# Joined non-significant Gas and Diesel dfs
+
+join_nonsf <- rbind(rq1_gas_nonsignificant %>% 
+                      mutate(., fuel_type = "Gas"), 
+                    rq1_diesel_nonsignificant %>% 
+                      mutate(., fuel_type = "Diesel"))
+
 # Window 1: 10<rt1<17 & 4<rt2<4.5
-window1 <- rq1_nonsignificant_wilcox_alpha0.1_df %>%
-  filter(., 10 < RT1 & RT1 < 17 & 4 < RT2 & RT2 < 4.5)
+window1 <- join_nonsf %>%
+  filter(., 10 < rt1 & rt1 < 17 & 4 < rt2 & rt2 < 4.5)
+
+transpose_window1 <- data.table::transpose(cat_5 %>%
+                                             rownames_to_column(., var = "comps") %>% 
+                                             filter(., comps %in% unique(window1$collapsed_compound)) %>%
+                                             column_to_rownames(., var = "comps"))
+
+colnames(transpose_window1) <- rownames(cat_5 %>%
+                                          rownames_to_column(., var = "comps") %>% 
+                                          filter(., comps %in% unique(window1$collapsed_compound)) %>%
+                                          column_to_rownames(., var = "comps"))
+rownames(transpose_window1) <- colnames(cat_5 %>%
+                                          rownames_to_column(., var = "comps") %>% 
+                                          filter(., comps %in% unique(window1$collapsed_compound)) %>%
+                                          column_to_rownames(., var = "comps"))
+
+window1_plotdat <- transpose_window1 %>% 
+  rownames_to_column(., var = "sample_name") %>% 
+  mutate(., fuel_type = ifelse(str_detect(sample_name, "D"), "Diesel", "Gas")) %>%
+  relocate(fuel_type, .after = sample_name)
 
 window1_plotlist <- list()
 i <- 1
-for (comp in unique(window1$collapsed_compound)) {
-  window1_plotlist[[i]] <- ggplot(data = window1 %>% filter(., collapsed_compound == comp),
-         aes(x = Area, fill = fuel_type)) +
+for (comp in colnames(window1_plotdat[, 3:ncol(window1_plotdat)])) {
+  dat <- window1_plotdat %>% select(., c(comp, fuel_type))
+  window1_plotlist[[i]] <- ggplot(data = dat,
+         aes(x = dat[,1], fill = fuel_type)) +
     geom_histogram(bins = 100, alpha = 0.5, position = "identity") + 
     ggtitle(comp) +
-    theme(legend.position = "none")
+    theme(legend.position = "none",
+          axis.title.x=element_text()) +
+    xlab("Percent Area")
   i <- i + 1
 }
 
@@ -93,75 +241,140 @@ legend <- cowplot::get_legend(window1_plotlist[[1]] + theme(legend.position = "b
 grid.arrange(grobs = window1_plotlist, ncol = 4, bottom = legend)
   
 # Window 2: rt1<10 & 3<rt2<3.7
-window2 <- rq1_nonsignificant_wilcox_alpha0.1_df %>%
-  filter(., RT1 < 10 & 3 < RT2 & RT2 < 3.7)
+window2 <- join_nonsf %>%
+  filter(., rt1 < 10 & 3 < rt2 & rt2 < 3.7)
+
+transpose_window2 <- data.table::transpose(cat_5 %>%
+                                             rownames_to_column(., var = "comps") %>% 
+                                             filter(., comps %in% unique(window2$collapsed_compound)) %>%
+                                             column_to_rownames(., var = "comps"))
+
+colnames(transpose_window2) <- rownames(cat_5 %>%
+                                          rownames_to_column(., var = "comps") %>% 
+                                          filter(., comps %in% unique(window2$collapsed_compound)) %>%
+                                          column_to_rownames(., var = "comps"))
+rownames(transpose_window2) <- colnames(cat_5 %>%
+                                          rownames_to_column(., var = "comps") %>% 
+                                          filter(., comps %in% unique(window2$collapsed_compound)) %>%
+                                          column_to_rownames(., var = "comps"))
+
+window2_plotdat <- transpose_window2 %>% 
+  rownames_to_column(., var = "sample_name") %>% 
+  mutate(., fuel_type = ifelse(str_detect(sample_name, "D"), "Diesel", "Gas")) %>%
+  relocate(fuel_type, .after = sample_name)
 
 window2_plotlist <- list()
 i <- 1
-for (comp in unique(window2$collapsed_compound)) {
-  window2_plotlist[[i]] <- ggplot(data = window2 %>% filter(., collapsed_compound == comp),
-                                  aes(x = Area, fill = fuel_type)) +
+for (comp in colnames(window2_plotdat[, 3:ncol(window2_plotdat)])) {
+  dat <- window2_plotdat %>% select(., c(comp, fuel_type))
+  window2_plotlist[[i]] <- ggplot(data = dat,
+                                  aes(x = dat[,1], fill = fuel_type)) +
     geom_histogram(bins = 100, alpha = 0.5, position = "identity") + 
     ggtitle(comp) +
-    theme(legend.position = "none")
+    theme(legend.position = "none",
+          axis.title.x=element_text()) +
+    xlab("Percent Area")
   i <- i + 1
 }
 
 legend <- cowplot::get_legend(window2_plotlist[[1]] + theme(legend.position = "bottom")) 
 grid.arrange(grobs = window2_plotlist, ncol = 6, bottom = legend)
 
-# Gas vs. Diesel - ASTM compounds that significant with Wilcoxon alpha0.1
-bubble_plot_rq1(ASTM_rq1_cat5_wilcox_alpha0.1_df)
+# Gas vs. Diesel - ASTM compounds that significant with Wilcoxon alpha0.1 ------
+# bubble_plot_rq1(ASTM_rq1_cat5_wilcox_alpha0.1_df)
 
-# Gas vs. Diesel - BEYOND ASTM compounds that significant with Wilcoxon alpha0.1
-bubble_plot_rq1(beyond_ASTM_rq1_cat5_wilcox_alpha0.1_df)
+# Gas vs. Diesel - BEYOND ASTM compounds that significant with Wilcoxon alpha0.1 ------
+# bubble_plot_rq1(beyond_ASTM_rq1_cat5_wilcox_alpha0.1_df)
 
-# Research Question 2: Gas stations 1,3,7 vs. 5,7,9 -------------------------------------------------------
-rq2_statsPCA_inputdf <- shared_comp_normalized %>% 
-  filter(., fuel_type %in% "Gas") %>%
-  filter(., collapsed_compound %in% colnames(rq2_cat2_stats))
+# Research Question 2: Gas stations 1,3,8 vs. 5,7,9 -------------------------------------------------------
+# Gas station 1,3,8 significant ------------------
+df_138 <- df_stats_rq2_rt10.1[which(df_stats_rq2_rt10.1$gas_station %in% c("Station_1", "Station_3", "Station_8")), 
+                                                    c(1, 3:ncol(df_stats_rq2_rt10.1))]
+rownames(df_138) <- NULL
+df_138 <- df_138 %>%
+  column_to_rownames(., var = "sample_name")
 
-rq2_significant_wilcox_df <- shared_comp_normalized %>%
-  filter(., fuel_type %in% "Gas") %>%
-  filter(., collapsed_compound %in% rq2_cat2_alpha0.05$collapsed_compound)
+transpose_df138 <- data.table::transpose(df_138)
+rownames(transpose_df138) <- colnames(df_138)
+colnames(transpose_df138) <- rownames(df_138)
 
-# rq2_toploading_pca
+rq2_gas_138 <- transpose_df138 %>% 
+  mutate(area = base::rowMeans(select(., 1:12))) %>% 
+  rownames_to_column(., var = "collapsed_compound") %>%
+  relocate(area, .after = collapsed_compound) %>%
+  select(., 1:2) %>%
+  filter(., collapsed_compound %in% wilcox_result_rt10.1[[2]]$collapsed_compound)
 
-rq2_nonsignificant_wilcox_df <- setdiff(rq2_statsPCA_inputdf, rq2_significant_wilcox_df)
-
-df_group1 <- rq2_significant_wilcox_df %>%
-  filter(., gas_station %in% c("Station_5", "Station_7", "Station_9")) %>%
+rq2_gas_138_rt <- shared_comp_normalized_rt10.1 %>%
+  filter(., fuel_type == "Gas") %>%
+  filter(., collapsed_compound %in% wilcox_result_rt10.1[[2]]$collapsed_compound) %>%
+  # filter(., gas_station %in% c("Station_1", "Station_3", "Station_8")) %>%
   group_by(collapsed_compound) %>%
   summarise(rt1 = mean(RT1), 
-            rt2 = mean(RT2),
-            area = median(Percent_Area))
+            rt2 = mean(RT2))
 
-df_group2 <- rq2_significant_wilcox_df %>%
-  filter(., gas_station %in% c("Station_1", "Station_3", "Station_8")) %>%
+rq2_gas_138_significant <- dplyr::right_join(rq2_gas_138, rq2_gas_138_rt, by = "collapsed_compound")
+
+# Gas station 5,7,9 significant -----------
+df_579 <- df_stats_rq2_rt10.1[which(df_stats_rq2_rt10.1$gas_station %in% c("Station_5", "Station_7", "Station_9")), 
+                              c(1, 3:ncol(df_stats_rq2_rt10.1))]
+rownames(df_579) <- NULL
+df_579 <- df_579 %>%
+  column_to_rownames(., var = "sample_name")
+
+transpose_df579 <- data.table::transpose(df_579)
+rownames(transpose_df579) <- colnames(df_579)
+colnames(transpose_df579) <- rownames(df_579)
+
+rq2_gas_579 <- transpose_df579 %>% 
+  mutate(area = base::rowMeans(select(., 1:9))) %>% 
+  rownames_to_column(., var = "collapsed_compound") %>%
+  relocate(area, .after = collapsed_compound) %>%
+  select(., 1:2) %>%
+  filter(., collapsed_compound %in% wilcox_result_rt10.1[[2]]$collapsed_compound)
+
+rq2_gas_579_rt <- shared_comp_normalized_rt10.1 %>%
+  filter(., fuel_type == "Gas") %>%
+  filter(., collapsed_compound %in% wilcox_result_rt10.1[[2]]$collapsed_compound) %>%
+  # filter(., gas_station %in% c("Station_5", "Station_7", "Station_9")) %>%
   group_by(collapsed_compound) %>%
   summarise(rt1 = mean(RT1), 
-            rt2 = mean(RT2),
-            area = median(Percent_Area))
+            rt2 = mean(RT2))
 
-group1_bubble <- ggplot(data = df_group1, aes(x = rt1, y = rt2, size = area)) +
-  geom_point(pch = 21) + 
-  scale_size(limits = c(min(min(df_group1$area), min(df_group2$area)), 
-                        max(max(df_group1$area), max(df_group2$area)))) +
-  scale_alpha(limits = c(min(min(df_group1$area), min(df_group2$area)), 
-                         max(max(df_group1$area), max(df_group2$area)))) +
-  theme(legend.position = "none") + 
-  ggtitle("Station 5,7,9")
+rq2_gas_579_significant <- dplyr::right_join(rq2_gas_579, rq2_gas_579_rt, by = "collapsed_compound")
 
-group2_bubble <- ggplot(data = df_group2, aes(x = rt1, y = rt2, size = area)) +
-  geom_point(pch = 21) + 
-  scale_size(limits = c(min(min(df_group1$area), min(df_group2$area)), 
-                        max(max(df_group1$area), max(df_group2$area)))) +
-  scale_alpha(limits = c(min(min(df_group1$area), min(df_group2$area)), 
-                         max(max(df_group1$area), max(df_group2$area)))) +
-  theme(legend.position = "none") + 
-  ggtitle("Station 1,3,8")
+# Gas 138 vs. Gas 579 - compounds that significant with Wilcoxon alpha0.1---------------
+rq2_138_significant <- rq2_gas_138_significant %>% mutate(., gas_station = "Gas station 1,3,8")
+rq2_579_significant <- rq2_gas_579_significant %>% mutate(., gas_station = "Gas station 5,7,9")
+rq2_sig <- rbind(rq2_138_significant, rq2_579_significant)
 
-legend <- cowplot::get_legend(group1_bubble +
-                                theme(legend.position = "bottom"))
+# Add ASTM group
+ASTM_group <- ASTM_list %>% filter(., !is.na(Group))
 
-grid.arrange(grobs = list(group1_bubble, group2_bubble), ncol = 2, bottom = legend)
+for (group in unique(ASTM_group$Group)) {
+  minrt1 <- min(ASTM_group[ASTM_group$Group == group,]$RT1)
+  maxrt1 <- max(ASTM_group[ASTM_group$Group == group,]$RT1)
+  minrt2 <- min(ASTM_group[ASTM_group$Group == group,]$RT2)
+  maxrt2 <- max(ASTM_group[ASTM_group$Group == group,]$RT2)
+  idx <- which(rq2_sig$rt1 < maxrt1 &
+                 rq2_sig$rt1 > minrt1 &
+                 rq2_sig$rt2 < maxrt2 &
+                 rq2_sig$rt2 > minrt2)
+  rq2_sig[idx, "group"] <- group
+}
+
+colnames(rq2_sig) <- c("collapsed_compound", "TSN-normalized area", "Retention time 1",
+                       "Retention time 2", "gas_station", "Chemical Group")
+
+ggplot() +
+  geom_point(data = rq2_sig, aes(x = `Retention time 1`, y = `Retention time 2`,
+                                 size = `TSN-normalized area`, color = `Chemical Group`),
+             pch = 21) +
+  # stat_ellipse() +
+  facet_grid(~gas_station) +
+  scale_size(limits = c(min(min(rq2_138_significant$area), min(rq2_579_significant$area)), 
+                        max(max(rq2_138_significant$area), max(rq2_579_significant$area))),
+             range = c(2,12)) +
+  guides(colour = guide_legend(override.aes = list(size=5))) +
+  theme_classic2(base_size = 20)
+

@@ -319,11 +319,11 @@ for (i in 1:length(df_list_step1.1)) {
   
 df_step1.2 <- purrr::map(df_list_step1.1, filtering, filter_list = c("^Carbon disulfide$", 
                                                                      "Cyclotrisiloxane..hexamethyl",
-                                                                     "Cyclotetrasiloxane..octamethyl",
-                                                                     "^Benzene$",
-                                                                     "^Toluene$",
-                                                                     "^Ethylbenzene$",
-                                                                     "Xylene")) 
+                                                                     "Cyclotetrasiloxane..octamethyl"))
+                                                                     # "^Benzene$",
+                                                                     # "^Toluene$",
+                                                                     # "^Ethylbenzene$",
+                                                                     # "Xylene")) 
 # df_clean <- dplyr::bind_rows(df_list_clean)
 
 # STEP 1.2B Filtering out limit of observations----------------------------
@@ -336,11 +336,11 @@ df_step1.3 <- bind_rows(list_remaining_area)
 
 
 # STEP 1.3B: Grouping compounds based on RT1, RT2, Ion1 threshold 
-rt10.2 <- grouping_comp_ver1(df_step1.3,
-                             rt1thres = 0.2,
-                             rt2thres = 0.15,
-                             ion1thres = 0.05, # Ion 1 and 2 indicates molecular structure (2 most prevalent mass-to-charge)
-                             ion2thres = 0.05)
+# rt10.2 <- grouping_comp_ver1(df_step1.3,
+#                              rt1thres = 0.2,
+#                              rt2thres = 0.15,
+#                              ion1thres = 0.05, # Ion 1 and 2 indicates molecular structure (2 most prevalent mass-to-charge)
+#                              ion2thres = 0.05)
 
 rt10.1 <- grouping_comp_ver1(df_step1.3,
                              rt1thres = 0.1,
@@ -349,18 +349,18 @@ rt10.1 <- grouping_comp_ver1(df_step1.3,
                              ion2thres = 0.05)
 
 
-rt10.3 <- grouping_comp_ver1(df_step1.3,
-                             rt1thres = 0.3,
-                             rt2thres = 0.15,
-                             ion1thres = 0.05, # Ion 1 and 2 indicates molecular structure (2 most prevalent mass-to-charge)
-                             ion2thres = 0.05)
+# rt10.3 <- grouping_comp_ver1(df_step1.3,
+#                              rt1thres = 0.3,
+#                              rt2thres = 0.15,
+#                              ion1thres = 0.05, # Ion 1 and 2 indicates molecular structure (2 most prevalent mass-to-charge)
+#                              ion2thres = 0.05)
 
 # STEP 2: Identify shared and unique compound groups across samples ------------------------------------------------
 # RT1 0.2
-filter_rt10.2 <- comp_filter_ver1(rt10.2, 
-                                  length(ILR_file_list))
-
-shared_comp_rt10.2 <- bind_rows(filter_rt10.2[[1]], filter_rt10.2[[2]])
+# filter_rt10.2 <- comp_filter_ver1(rt10.2, 
+#                                   length(ILR_file_list))
+# 
+# shared_comp_rt10.2 <- bind_rows(filter_rt10.2[[1]], filter_rt10.2[[2]])
 
 # RT1 0.1
 filter_rt10.1 <- comp_filter_ver1(rt10.1, 
@@ -369,10 +369,10 @@ filter_rt10.1 <- comp_filter_ver1(rt10.1,
 shared_comp_rt10.1 <- bind_rows(filter_rt10.1[[1]], filter_rt10.1[[2]])
 
 # RT1 0.3
-filter_rt10.3 <- comp_filter_ver1(rt10.3, 
-                                  length(ILR_file_list))
-
-shared_comp_rt10.3 <- bind_rows(filter_rt10.3[[1]], filter_rt10.3[[2]])
+# filter_rt10.3 <- comp_filter_ver1(rt10.3, 
+#                                   length(ILR_file_list))
+# 
+# shared_comp_rt10.3 <- bind_rows(filter_rt10.3[[1]], filter_rt10.3[[2]])
 
 # STEP 3: Data Normalization ================================================================================
 add_data_normalization <- function(data) {
@@ -397,6 +397,7 @@ add_data_normalization <- function(data) {
   return(newdata)
 }
 
-shared_comp_normalized_rt10.2 <- add_data_normalization(shared_comp_rt10.2)
 shared_comp_normalized_rt10.1 <- add_data_normalization(shared_comp_rt10.1)
-shared_comp_normalized_rt10.3 <- add_data_normalization(shared_comp_rt10.3)
+# shared_comp_normalized_rt10.2 <- add_data_normalization(shared_comp_rt10.2)
+# shared_comp_normalized_rt10.3 <- add_data_normalization(shared_comp_rt10.3)
+

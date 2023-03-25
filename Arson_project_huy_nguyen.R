@@ -385,6 +385,25 @@ for (i in 1:length(df_list_step1.1)) {
   colnames(df_list_step1.1[[i]]) <- gsub(" ", "", colnames(df_list_step1.1[[i]]))
   }
 
+# Plotting data distribution pre-removal------------------
+data_plot_pre_removal <- list() # NOTE: Data sets are all heavy left-skewed
+for (i in 1:length(df_list_step1.1)) {
+  filter_area <- df_list_step1.1[[i]]
+  data_plot_pre_removal[[i]] <- ggplot(data = filter_area,
+                                       aes(x = Area)) +
+    geom_histogram(bins = 2000000/25000) +
+    ggtitle(ILR_file_list[[i]]) +
+    scale_x_continuous(limits = c(0, 2000000)) +
+    labs(x = NULL, y = NULL) + 
+    theme(legend.position = "hidden", 
+          axis.title = element_text(size = 5),
+          axis.text.x = element_text(size = 13),
+          axis.text.y = element_text(size = 12))
+}
+
+y <- grid::textGrob("Count", rot = 90, gp = gpar(fontsize = 20))
+x <- grid::textGrob("Peak Area", gp = gpar(fontsize = 20))
+grid.arrange(grobs = data_plot_pre_removal, ncol = 5, left = y, bottom = x)
 
 # STEP 1.2A: Filtering out column bleed, solvent and BTEX and minimum area observations--------------------------------------
 df_step1.2 <- purrr::map(df_list_step1.1, filtering, filter_list = c("^Carbon disulfide$", 
@@ -396,60 +415,44 @@ df_step1.2 <- purrr::map(df_list_step1.1, filtering, filter_list = c("^Carbon di
                                                                 "Xylene")) 
 
 
-# Plotting data distribution pre-removal------------------
-data_plot_pre_removal <- list() # NOTE: Data sets are all heavy left-skewed
-for (i in 1:length(df_list_clean)) {
-  filter_area <- df_list_clean[[i]]
-  data_plot_pre_removal[[i]] <- ggplot(data = filter_area,
-                         aes(x = Area)) +
-    geom_histogram(bins = 2000000/25000) +
-    ggtitle(indi_IL_file_list[[i]]) +
-    scale_x_continuous(limits = c(0, 2000000)) +
-    labs(x = NULL, y = NULL) + 
-    theme(legend.position = "hidden", axis.title = element_text(size = 5))
-}
-
-y <- grid::textGrob("Count", rot = 90, gp = gpar(fontsize = 15))
-x <- grid::textGrob("Peak Area", gp = gpar(fontsize = 15))
-grid.arrange(grobs = data_plot_pre_removal, ncol = 5, left = y, bottom = x)
-
 # QUALITY CONTROL A OF STEP 1.2B: Plot Percentage coverage after removal of limit observation----------------------------
 plot_a <- list()
-for (i in 1:length(df_list_clean)) {
+for (i in 1:length(df_list_step1.1)) {
   coverage <- c()
   for (threshold in c(seq(from = 0, to = 200000, by = 50000))) {
-    df_filter_area <- df_list_clean[[i]] %>%
+    df_filter_area <- df_list_step1.1[[i]] %>%
       filter(., Area > threshold)
-    coverage <- c(coverage, sum(df_filter_area$Area)*100/sum(df_list_clean[[i]]$Area))
+    coverage <- c(coverage, sum(df_filter_area$Area)*100/sum(df_list_step1.1[[i]]$Area))
   }
   df <- data.frame(thres = seq(from = 0, to = 200000, by = 50000), cover = coverage)
   plot_a[[i]] <- ggplot(data = df,
                       aes(x = thres, y = cover)) +
     geom_col() +
-    geom_text(aes(label = round(cover, digits = 3)), color = "green", angle = 90, hjust = 1.5) +
-    scale_x_continuous(breaks = seq(from = 0, to = 200000, by = 50000), 
+    theme(text = element_text(size = 20)) +
+    geom_text(aes(label = round(cover, digits = 3)), color = "green", angle = 90, hjust = 1, size = 6) +
+    scale_x_continuous(breaks = seq(from = 0, to = 200000, by = 50000),
                        # remove space between plotted data and xy-axes
                        expand = c(0,0)) +
     scale_y_continuous(breaks = seq(from = 0, to = 100, by = 25), 
                        # remove space between plotted data and xy-axes
                        expand = c(0,0)) +
-    ggtitle(indi_IL_file_list[[i]]) +
-    theme(axis.text.x = element_text(size = 10), 
-          axis.text.y = element_text(size = 10)) + 
-    labs(x = NULL, y = NULL) +
-    theme_classic()
+    ggtitle(ILR_file_list[[i]]) +
+    labs(x = NULL, y = NULL) 
 }
 
+y <- textGrob("Percentage coverage of remaining peaks after removal", rot = 90, gp = gpar(fontsize = 20))
+x <- textGrob("Threshold of removal for limit observations", gp = gpar(fontsize = 20))
+
 grid.arrange(grobs = plot_a, ncol = 5, 
-             left = "Percentage coverage of remaining peaks after removal",
-             bottom = "Threshold of removal for limit observations")
+             left = y,
+             bottom = x)
 
 # QUALITY CONTROL B OF STEP 1.2B: Plot number of peak remains after removal of limit observation----------------------------
 plot_b <- list()
-for (i in 1:length(df_list_clean)) {
+for (i in 1:length(df_list_step1.1)) {
   peak_remain <- c()
   for (threshold in c(seq(from = 0, to = 200000, by = 50000))) {
-    df_filter_area <- df_list_clean[[i]] %>%
+    df_filter_area <- df_list_step1.1[[i]] %>%
       filter(., Area > threshold)
     peak_remain <- c(peak_remain, dim(df_filter_area)[1])
   }
@@ -461,20 +464,24 @@ for (i in 1:length(df_list_clean)) {
     scale_x_continuous(breaks = seq(from = 0, to = 200000, by = 50000), 
                        # remove space between plotted data and xy-axes
                        expand = c(0,0)) +
-    ggtitle(indi_IL_file_list[[i]]) +
-    theme(axis.text.x = element_text(size = 10),
-          axis.text.y = element_text(size = 10)) +
+    ggtitle(ILR_file_list[[i]]) +
+    theme(axis.text.x = element_text(size = 20),
+          axis.text.y = element_text(size = 20)) +
     labs(x = NULL, y = NULL) +
     theme_classic()
 }
 
+y <- textGrob("Number of peak remains after removal of limit observation", rot = 90, gp = gpar(fontsize = 15))
+x <- textGrob("Threshold of removal for limit observations", gp = gpar(fontsize = 15))
+
 grid.arrange(grobs = plot_b, ncol = 5, 
-             left = "Number of peak remains after removal of limit observation",
-             bottom = "Threshold of removal for limit observations")
+             left = y,
+             bottom = x)
 
 # STEP 1.2B Filtering out limit of observations----------------------------
 list_remaining_area <- limit_obser(df_step1.2, ILR_file_list, cap = 50000)[[1]]
 list_removed_area <- limit_obser(df_step1.2, ILR_file_list, cap = 50000)[[2]]
+
 
 # QUALITY CONTROL C (CONFIRMATION) OF STEP 1.2B: -----------------------
 ## Plotting post-removal data distribution
@@ -496,10 +503,10 @@ grid.arrange(grobs = data_plot_post_removal, ncol = 5, left = y, bottom = x)
 
 ## Plot distribution of RT1 and RT2 in remaining and removed compound after threshold removal 
 df_remaining_area <- bind_rows(list_remaining_area) %>%
-  mutate(label = "remaining_area")
+  mutate(label = "remaining area")
 
 df_removed_area <- bind_rows(list_removed_area) %>%
-  mutate(label = "removed_area")
+  mutate(label = "removed area")
 
 df_both <- bind_rows(df_remaining_area, df_removed_area)
 
@@ -508,8 +515,10 @@ ggplot(data = df_both) +
   geom_point(aes(x = RT1, y = RT2, color = label), size = 0.25, alpha = 0.5) +
   scale_color_manual(values = c("#41b6c4", "#e34a33")) + 
   facet_wrap(~sample_name) +
+  guides(colour = guide_legend(override.aes = list(size=5))) +
   theme(panel.grid = element_blank(),
-        text = element_text(size = 20))
+        text = element_text(size = 20),
+        legend.title = element_blank())
 
 
 # STEP 1.3: Grouping compounds based on RT1, RT2, Ion1 -----------------------------------------------------------------------
