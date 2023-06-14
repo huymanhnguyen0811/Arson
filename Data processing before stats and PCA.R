@@ -332,7 +332,7 @@ list_removed_area <- limit_obser(df_step1.2, ILR_file_list, cap = 50000)[[2]]
 # STEP 1.3: Grouping compounds based on RT1, RT2, Ion1 -----------------------------------------------------------------------
 # STEP 1.3A: Generate 1 grand data frame of all 31 IL samples
 
-df_step1.3 <- bind_rows(list_remaining_area) 
+df_step1.3 <- bind_rows(list_remaining_area)
 
 
 # STEP 1.3B: Grouping compounds based on RT1, RT2, Ion1 threshold 
