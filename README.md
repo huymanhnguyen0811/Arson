@@ -31,11 +31,11 @@ Further details on the package and PCA functions used can be found in folder dem
 
 ### Gas versus Diesel
 
-![](Embedded visualizations/figure-markdown_github/unnamed-chunk-4-1.png)
+![](figure-markdown_github/unnamed-chunk-4-1.png)
 
 ### Between groups of gas stations
 
-![](Embedded visualizations/figure-markdown_github/unnamed-chunk-5-1.png)
+![](figure-markdown_github/unnamed-chunk-5-1.png)
 
 ## Multiple Wilcoxon tests with p-value correction for multiple testing
 
@@ -58,13 +58,13 @@ DieselData <- as.vector(t(cat_5[,c(22:25)])) # 19076 data point
 hist(GasData, col='steelblue', main='Gas')
 ```
 
-![](Embedded visualizations/figure-markdown_github/unnamed-chunk-7-1.png)
+![](figure-markdown_github/unnamed-chunk-7-1.png)
 
 ``` r
 hist(DieselData, col='steelblue', main='Diesel')
 ```
 
-![](Embedded visualizations/figure-markdown_github/unnamed-chunk-7-2.png)
+![](figure-markdown_github/unnamed-chunk-7-2.png)
 
 ``` r
 # Q-Q plots aka. Normal Probability plots
@@ -72,14 +72,14 @@ stats::qqnorm(GasData, main='Gas')
 stats::qqline(GasData)
 ```
 
-![](Embedded visualizations/figure-markdown_github/unnamed-chunk-7-3.png)
+![](figure-markdown_github/unnamed-chunk-7-3.png)
 
 ``` r
 stats::qqnorm(DieselData, main='Diesel')
 stats::qqline(DieselData)
 ```
 
-![](Embedded visualizations/figure-markdown_github/unnamed-chunk-7-4.png)
+![](figure-markdown_github/unnamed-chunk-7-4.png)
 
 Then, equality of variance between Gas and Diesel populations can be
 examined using Levene’s test and Fligner-Killeen test for non-normally
@@ -134,7 +134,7 @@ for both tests, p values are \< 0.05, and thus, there is a significant
 difference in variances between Gas station group 1 (1, 3, 8) and Gas
 station group 2 (5, 7, 9) populations.
 
-![](Embedded visualizations/figure-markdown_github/unnamed-chunk-11-1.png)![](Embedded visualizations/figure-markdown_github/unnamed-chunk-11-2.png)![](Embedded visualizations/figure-markdown_github/unnamed-chunk-11-3.png)![](Embedded visualizations/figure-markdown_github/unnamed-chunk-11-4.png)
+![](figure-markdown_github/unnamed-chunk-11-1.png)![](figure-markdown_github/unnamed-chunk-11-2.png)![](figure-markdown_github/unnamed-chunk-11-3.png)![](figure-markdown_github/unnamed-chunk-11-4.png)
 
     ## Levene's Test for Homogeneity of Variance (center = median)
     ##          Df F value Pr(>F)
