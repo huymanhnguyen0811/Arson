@@ -31,7 +31,7 @@ Further details on the package and PCA functions used can be found in folder dem
 
 ### Gas versus Diesel
 
-![](figure-markdown_github/unnamed-chunk-4-1.png)
+![](/figure-markdown_github/unnamed-chunk-4-1.png)
 
 ### Between groups of gas stations
 
@@ -58,7 +58,7 @@ DieselData <- as.vector(t(cat_5[,c(22:25)])) # 19076 data point
 hist(GasData, col='steelblue', main='Gas')
 ```
 
-![](figure-markdown_github/unnamed-chunk-7-1.png)
+![](/figure-markdown_github/unnamed-chunk-7-1.png)
 
 ``` r
 hist(DieselData, col='steelblue', main='Diesel')
