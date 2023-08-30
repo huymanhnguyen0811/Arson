@@ -12,9 +12,15 @@ knitr::opts_chunk$set(echo = FALSE)
 
 ## Documentation
 
-This repo is accompanying the publication: "..."
+This repo is accompanying the publication: "The Use of Computational Fingerprinting Techniques to Distinguish Sources of Accelerants Used in Wildfire Arson".
 
-This workflow ran on Windows 11 OS 11th Gen Intel(R) Core(TM) i7-11800H @ 2.30GHz, 16 GB RAM; RStudio 2023.06.0+421 "Mountain Hydrangea" Release for Windows; R version 4.3.1
+Users need to first install R with this [link](https://cran.r-project.org/mirrors.html) and Rstudio with this [link](https://posit.co/download/rstudio-desktop/).
+
+This workflow ran on Windows 11 OS 11th Gen Intel(R) Core(TM) i7-11800H \@ 2.30GHz, 16 GB RAM;
+
+THe RStudio version used in this demo is 2023.06.0+421 "Mountain Hydrangea" Release for Windows;
+
+The R version used in this demo is 4.3.1
 
 ## Data processing
 
@@ -32,6 +38,7 @@ library(data.table)
 library(Hmisc)
 
 ```
+
 ```{r, echo = TRUE, message = FALSE, warning = FALSE}
 # Functions -------------------------------------------------------------------------------------------------------
 filtering <- function(df, filter_list) {
@@ -239,6 +246,7 @@ shared_comp_normalized_rt10.1 <- add_data_normalization(shared_comp_rt10.1)
 ## PCA
 
 ### Gas versus Diesel
+
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 library(PCAtools)
 
@@ -303,7 +311,7 @@ p_rq1_rt10.1 <- pca(mat = df_pca_rq1_rt10.1[[1]], metadata = df_pca_rq1_rt10.1[[
 
 # A bi-plot
 PCAtools::biplot(p_rq1_rt10.1,
-                 lab = row.names(p_rq1_rt10.2$metadata),
+                 lab = row.names(p_rq1_rt10.1$metadata),
                  colby = 'Fuel type',
                  hline = 0, vline = 0,
                  legendPosition = 'right', labSize = 5,
@@ -318,6 +326,7 @@ PCAtools::biplot(p_rq1_rt10.1,
 ```
 
 ### Between groups of gas stations
+
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 # Research Question 2 PCA ##########################
 # Category 2: Compounds that have >=2 data points for each gas stations
@@ -489,6 +498,7 @@ biplot(p_rq2_rt10.1,
 ## Multiple Wilcoxon tests with p-value correction for multiple testing
 
 ### Research Question 1: Gas versus Diesel
+
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 stats_rq1 <- shared_comp_normalized_rt10.1 %>%
   filter(., fuel_type %in% c("Gas", "Diesel")) %>%
@@ -533,7 +543,8 @@ stats::qqnorm(DieselData, main='Diesel')
 stats::qqline(DieselData)
 ```
 
-Then, equality of variance between Gas and Diesel populations can be examined using Levene’s test and Fligner-Killeen test for non-normally distributed data. Here, for both tests, p values are < 0.05, and thus, there is significant difference in variances between Gas and Diesel populations. 
+Then, equality of variance between Gas and Diesel populations can be examined using Levene's test and Fligner-Killeen test for non-normally distributed data. Here, for both tests, p values are \< 0.05, and thus, there is significant difference in variances between Gas and Diesel populations.
+
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 # Levene’s test-non-normally distributed data
 library(car)
@@ -546,8 +557,7 @@ car::leveneTest(data ~ group, data = non_norm_dist_data)
 stats::fligner.test(data ~ group, data = non_norm_dist_data)
 ```
 
-
-Here, multiple Wilcoxon tests followed by p-value correction for multiple testing was done. Different method for p-value correction from function *p.adjust* from package **stats** were used. After p-value correction, the threshold for p-value can be set (for example,p.adjust < 0.05 or < 0.1), to see how it affects the number of significant compounds that can be found. Importantly, the threshold should be set so that it can include as many ASTM reference compounds in the list of significant compounds as possible. For example here, no significant compounds can be found with adjusted p-value < 0.05. But when adjusted p-value is < 0.1, 127 significant compounds are found.
+Here, multiple Wilcoxon tests followed by p-value correction for multiple testing was done. Different method for p-value correction from function *p.adjust* from package **stats** were used. After p-value correction, the threshold for p-value can be set (for example,p.adjust \< 0.05 or \< 0.1), to see how it affects the number of significant compounds that can be found. Importantly, the threshold should be set so that it can include as many ASTM reference compounds in the list of significant compounds as possible. For example here, no significant compounds can be found with adjusted p-value \< 0.05. But when adjusted p-value is \< 0.1, 127 significant compounds are found.
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 # Wilcoxon Test ========================================================================================
@@ -580,8 +590,8 @@ rq1_p0.1 <- summary_table %>%
 paste0("Number of significant compounds adjusted p-value < 0.1 = ", dim(rq1_p0.1)[1])
 ```
 
-
 ### Research Question 2: Distinguishing samples from groups of gas stations
+
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 df_rq2 <- function(data) {
   mydata2 <- data %>%
@@ -707,7 +717,7 @@ Here again, before running multiple Wilcoxon tests, it is recommended to examine
 
 First, equal variance and normally distributed between two populations, here are Gas and Diesel using histogram, Q-Q plots. Here, both Gas station group 1 (1, 3, 8) and Gas station group 2 (5, 7, 9) populations are NOT normally distributed.
 
-Equality of variance between Gas station group 1 (1, 3, 8) and Gas station group 2 (5, 7, 9) populations can be examined using Levene’s test and Fligner-Killeen test for non-normally distributed data. Here, for both tests, p values are < 0.05, and thus, there is significant difference in variances between Gas station group 1 (1, 3, 8) and Gas station group 2 (5, 7, 9) populations. 
+Equality of variance between Gas station group 1 (1, 3, 8) and Gas station group 2 (5, 7, 9) populations can be examined using Levene's test and Fligner-Killeen test for non-normally distributed data. Here, for both tests, p values are \< 0.05, and thus, there is significant difference in variances between Gas station group 1 (1, 3, 8) and Gas station group 2 (5, 7, 9) populations.
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 # Examine whether 2 gas station groups have equal variance and normally distributed.-----------------------------------------------
@@ -740,7 +750,8 @@ car::leveneTest(data ~ group, data = non_norm_dist_data)
 stats::fligner.test(data ~ group, data = non_norm_dist_data)
 ```
 
-Here, multiple Wilcoxon tests followed by p-value correction for multiple testing was done. Different method for p-value correction from function *p.adjust* from package **stats** were used. After p-value correction, the threshold for p-value can be set (for example,p.adjust < 0.05 or < 0.1), to see how it affects the number of significant compounds that can be found. Importantly, the threshold should be set so that it can include as many ASTM reference compounds in the list of significant compounds as possible. For example here, no significant compounds can be found with adjusted p-value < 0.05. But when adjusted p-value is < 0.1, 127 significant compounds are found.
+Here, multiple Wilcoxon tests followed by p-value correction for multiple testing was done. Different method for p-value correction from function *p.adjust* from package **stats** were used. After p-value correction, the threshold for p-value can be set (for example,p.adjust \< 0.05 or \< 0.1), to see how it affects the number of significant compounds that can be found. Importantly, the threshold should be set so that it can include as many ASTM reference compounds in the list of significant compounds as possible. For example here, no significant compounds can be found with adjusted p-value \< 0.05. But when adjusted p-value is \< 0.1, 127 significant compounds are found.
+
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 # Wilcoxon exact test -----------------------
 # Compare between station 1,3,8 and 5,7,9
