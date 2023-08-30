@@ -27,15 +27,13 @@ this repo.
 
 ## PCA
 
-### Gas versus Diesel
+Further details on the package and PCA functions used can be found in folder demo analysis, under the following files: demo analysis_stats_RQ1 & RQ2.R and demo_analysis_PCA_RQ1 & RQ2.R 
 
-    ## [1] TRUE
+### Gas versus Diesel
 
 ![](Github-workflow-usage-instruction_files/figure-markdown_github/unnamed-chunk-4-1.png)
 
 ### Between groups of gas stations
-
-    ## [1] TRUE
 
 ![](Github-workflow-usage-instruction_files/figure-markdown_github/unnamed-chunk-5-1.png)
 
