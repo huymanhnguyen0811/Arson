@@ -29,14 +29,6 @@ this repo.
 
 Further details on the package and PCA functions used can be found in folder demo analysis, under the following files: demo analysis_stats_RQ1 & RQ2.R and demo_analysis_PCA_RQ1 & RQ2.R 
 
-### Gas versus Diesel
-
-![](/figure-markdown_github/unnamed-chunk-4-1.png)
-
-### Between groups of gas stations
-
-![](figure-markdown_github/unnamed-chunk-5-1.png)
-
 ## Multiple Wilcoxon tests with p-value correction for multiple testing
 
 ### Research Question 1: Gas versus Diesel
