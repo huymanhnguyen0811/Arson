@@ -25,62 +25,47 @@ df_pca_rq1 <- function(data) {
   }
   
   # table for information ((rows are sample IDs, columns are sample information) -----------------------
-  metadata_X_rq1 <- data.frame(unique((data %>%
-                                         filter(., fuel_type %in% c("Gas", "Diesel")))$sample_name)) 
+  metadata_X_rq1 <- data.frame(colnames(cat_5)) 
   colnames(metadata_X_rq1) <- c('sample_name')
   metadata_X_rq1 <- metadata_X_rq1 %>%
     mutate(fuel_type = ifelse(str_detect(sample_name, "DieselComp"), "DieselComp", 
                               ifelse(str_detect(sample_name, "GasComp"), "GasComp",
                                      ifelse(str_detect(sample_name, "D"), "Diesel", "Gas")))) %>%
-    # # Grouping samples into respective Gas stations
-    mutate(gas_station = ifelse(str_detect(sample_name, "F009"), "Station_9",
-                                ifelse(str_detect(sample_name, "F001"), "Station_1",
-                                       ifelse(str_detect(sample_name, "F007"), "Station_7",
-                                              ifelse(str_detect(sample_name, "F005"), "Station_5",
-                                                     ifelse(str_detect(sample_name, "F003"), "Station_3",
-                                                            ifelse(str_detect(sample_name, "F008"), "Station_8", "Composite"))))))) %>%
     column_to_rownames(., var = "sample_name")
   
-  move_to_last <- function(df, n) df[c(setdiff(seq_len(nrow(df)), n), n), ]
-  metadata_X_rq1 <- move_to_last(metadata_X_rq1, 5)
-  metadata_X_rq1 <- move_to_last(metadata_X_rq1, 2)
-  metadata_X_rq1 <- move_to_last(metadata_X_rq1, 7)
-  metadata_X_rq1 <- move_to_last(metadata_X_rq1, 21)
-
   print(all(colnames(cat_5) == rownames(metadata_X_rq1)))
   
   return(list(cat_5 ,metadata_X_rq1))
 }
 
-df_pca_rq1_rt10.1 <- df_pca_rq1(shared_comp_normalized_rt10.1)
-df_pca_rq1_rt10.2 <- df_pca_rq1(shared_comp_normalized_rt10.2)
-df_pca_rq1_rt10.3 <- df_pca_rq1(shared_comp_normalized_rt10.3)
+df_pca_rq1_rt10.1 <- df_pca_rq1(shared_comp_rt10.1)
+# df_pca_rq1_rt10.2 <- df_pca_rq1(shared_comp_normalized_rt10.2)
+# df_pca_rq1_rt10.3 <- df_pca_rq1(shared_comp_normalized_rt10.3)
 
 # Conduct principal component analysis (PCA):
-colnames(df_pca_rq1_rt10.1[[2]]) <- c("Fuel type", "Gas Stations")
-colnames(df_pca_rq1_rt10.2[[2]]) <- c("Fuel type", "Gas Stations")
-colnames(df_pca_rq1_rt10.3[[2]]) <- c("Fuel type", "Gas Stations")
+colnames(df_pca_rq1_rt10.1[[2]]) <- c("Fuel type")
+# colnames(df_pca_rq1_rt10.2[[2]]) <- c("Fuel type", "Gas Stations")
+# colnames(df_pca_rq1_rt10.3[[2]]) <- c("Fuel type", "Gas Stations")
 
 p_rq1_rt10.1 <- pca(mat = df_pca_rq1_rt10.1[[1]], metadata = df_pca_rq1_rt10.1[[2]])
-p_rq1_rt10.2 <- pca(mat = df_pca_rq1_rt10.2[[1]], metadata = df_pca_rq1_rt10.2[[2]])
-p_rq1_rt10.3 <- pca(mat = df_pca_rq1_rt10.3[[1]], metadata = df_pca_rq1_rt10.3[[2]])
-
-
+# p_rq1_rt10.2 <- pca(mat = df_pca_rq1_rt10.2[[1]], metadata = df_pca_rq1_rt10.2[[2]])
+# p_rq1_rt10.3 <- pca(mat = df_pca_rq1_rt10.3[[1]], metadata = df_pca_rq1_rt10.3[[2]])
 
 # A bi-plot
-PCAtools::biplot(p_rq1_rt10.3,
+library(ggalt)
+PCAtools::biplot(p_rq1_rt10.1,
                  lab = NULL, # #row.names(p_rq1_rt10.2$metadata)
                  colby = 'Fuel type',
                  hline = 0, vline = 0,
                  legendPosition = 'right', labSize = 5,
                  sizeLoadingsNames = 5,
-                 showLoadings = TRUE,
+                 showLoadings = FALSE,
                  # showLoadingsNames = FALSE,
                  ntopLoadings = 10,
                  pointSize = 4, 
                  legendLabSize = 15,
                  legendTitleSize = 16,
-                 legendIconSize = 6)
+                 legendIconSize = 6) + coord_fixed(ratio = 1) 
 
 # Retrieve compound name of top 100 loading
 loadingS_rq1_sorted <- p_rq1$loadings %>% arrange(PC1, PC2)
@@ -144,13 +129,13 @@ df_pca_rq2 <- function(data) {
     rownames_to_column(., var = "sample_name")
   
   transpose_mydata2_new <- transpose_mydata2 %>%
-    # # Grouping samples into respective Gas stations
-    mutate(gas_station = ifelse(str_detect(sample_name, "F009"), "Station_9",
+    # Grouping samples into respective Gas stations
+    mutate(gas_station = ifelse(str_detect(sample_name, "F009"), "Station_6", 
                                 ifelse(str_detect(sample_name, "F001"), "Station_1",
-                                       ifelse(str_detect(sample_name, "F007"), "Station_7",
-                                              ifelse(str_detect(sample_name, "F005"), "Station_5",
-                                                     ifelse(str_detect(sample_name, "F003"), "Station_3",
-                                                            ifelse(str_detect(sample_name, "F008"), "Station_8", "Composite"))))))) %>%
+                                       ifelse(str_detect(sample_name, "F007"), "Station_4", 
+                                              ifelse(str_detect(sample_name, "F005"), "Station_3", 
+                                                     ifelse(str_detect(sample_name, "F003"), "Station_2", 
+                                                            ifelse(str_detect(sample_name, "F008"), "Station_5", "Composite"))))))) %>%
     relocate(gas_station, .after = sample_name)
   
   # Category 1 (rq2_cat1) : Compound found in only 1 gas station and not in any other
@@ -245,18 +230,17 @@ df_pca_rq2 <- function(data) {
   colnames(df_X_rq2) <- rownames(rq2_pca)
   
   # table for information ((rows are sample IDs, columns are sample information) -----------------------
-  metadata_X_rq2 <- data.frame(unique((data %>%
-                                         filter(., fuel_type %in% "Gas"))$sample_name)) 
+  metadata_X_rq2 <- data.frame(colnames(df_X_rq2)) 
   colnames(metadata_X_rq2) <- c('sample_name')
   
   metadata_X_rq2 <- metadata_X_rq2 %>%
     # # Grouping samples into respective Gas stations
-    mutate(gas_station = ifelse(str_detect(sample_name, "F009"), "Station_9",
+    mutate(gas_station = ifelse(str_detect(sample_name, "F009"), "Station_6", 
                                 ifelse(str_detect(sample_name, "F001"), "Station_1",
-                                       ifelse(str_detect(sample_name, "F007"), "Station_7",
-                                              ifelse(str_detect(sample_name, "F005"), "Station_5",
-                                                     ifelse(str_detect(sample_name, "F003"), "Station_3",
-                                                            ifelse(str_detect(sample_name, "F008"), "Station_8", "Composite"))))))) %>%
+                                       ifelse(str_detect(sample_name, "F007"), "Station_4", 
+                                              ifelse(str_detect(sample_name, "F005"), "Station_3", 
+                                                     ifelse(str_detect(sample_name, "F003"), "Station_2", 
+                                                            ifelse(str_detect(sample_name, "F008"), "Station_5", "Composite"))))))) %>%
     column_to_rownames(., var = "sample_name") 
   
   # check that sample names match exactly between pdata and expression data 
@@ -265,34 +249,34 @@ df_pca_rq2 <- function(data) {
   return(list(df_X_rq2, metadata_X_rq2))
 }  
 
-df_pca_rq2_rt10.1 <- df_pca_rq2(shared_comp_normalized_rt10.1)
-df_pca_rq2_rt10.2 <- df_pca_rq2(shared_comp_normalized_rt10.2)
-df_pca_rq2_rt10.3 <- df_pca_rq2(shared_comp_normalized_rt10.3)
+df_pca_rq2_rt10.1 <- df_pca_rq2(shared_comp_rt10.1)
+# df_pca_rq2_rt10.2 <- df_pca_rq2(shared_comp_normalized_rt10.2)
+# df_pca_rq2_rt10.3 <- df_pca_rq2(shared_comp_normalized_rt10.3)
 
 # Conduct principal component analysis (PCA):
 # Give a better column name for pretty biplot later on
 colnames(df_pca_rq2_rt10.1[[2]]) <- c("Gas Stations")
-colnames(df_pca_rq2_rt10.2[[2]]) <- c("Gas Stations")
-colnames(df_pca_rq2_rt10.3[[2]]) <- c("Gas Stations")
+# colnames(df_pca_rq2_rt10.2[[2]]) <- c("Gas Stations")
+# colnames(df_pca_rq2_rt10.3[[2]]) <- c("Gas Stations")
 
 p_rq2_rt10.1 <- pca(mat = df_pca_rq2_rt10.1[[1]], metadata = df_pca_rq2_rt10.1[[2]])
-p_rq2_rt10.2 <- pca(mat = df_pca_rq2_rt10.2[[1]], metadata = df_pca_rq2_rt10.2[[2]])
-p_rq2_rt10.3 <- pca(mat = df_pca_rq2_rt10.3[[1]], metadata = df_pca_rq2_rt10.3[[2]])
+# p_rq2_rt10.2 <- pca(mat = df_pca_rq2_rt10.2[[1]], metadata = df_pca_rq2_rt10.2[[2]])
+# p_rq2_rt10.3 <- pca(mat = df_pca_rq2_rt10.3[[1]], metadata = df_pca_rq2_rt10.3[[2]])
 
 # A bi-plot
-biplot(p_rq2_rt10.3,
-       lab = NULL, #row.names(p_rq2_rt10.1$metadata),
-       colby = 'Gas Stations',
-       hline = 0, vline = 0,
-       legendPosition = 'right',labSize = 5,
-       sizeLoadingsNames = 5,
-       showLoadings = TRUE,
-       # showLoadingsNames = FALSE,
-       ntopLoadings = 8,
-       pointSize = 4, 
-       legendLabSize = 15,
-       legendTitleSize = 16,
-       legendIconSize = 6)
+PCAtools::biplot(p_rq2_rt10.1,
+                 lab = NULL, #row.names(p_rq2_rt10.1$metadata),
+                 colby = 'Gas Stations',
+                 hline = 0, vline = 0,
+                 legendPosition = 'right',labSize = 5,
+                 sizeLoadingsNames = 5,
+                 showLoadings = FALSE,
+                 # showLoadingsNames = FALSE,
+                 ntopLoadings = 8,
+                 pointSize = 4, 
+                 legendLabSize = 15,
+                 legendTitleSize = 16,
+                 legendIconSize = 6) + coord_fixed(ratio = 1) 
 
 # Pairs plot
 pairsplot(p_rq2,

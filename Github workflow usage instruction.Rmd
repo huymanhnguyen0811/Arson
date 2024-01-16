@@ -808,9 +808,9 @@ rq2_cat2_alpha0.1 <- rq2_cat2_summary_table %>%
 
 paste0("Number of significant compounds adjusted p-value < 0.1 = ", dim(rq2_cat2_alpha0.1)[1])
 
-View(shared_comp_rt10.1  %>%
-  filter(., fuel_type %in% "Gas") %>%
-  filter(., collapsed_compound %in% unique(rq2_cat2_alpha0.05$collapsed_compound)))
+# View(shared_comp_rt10.1  %>%
+#   filter(., fuel_type %in% "Gas") %>%
+#   filter(., collapsed_compound %in% unique(rq2_cat2_alpha0.05$collapsed_compound)))
 
 export_rq2 <- shared_comp_rt10.1  %>%
   filter(., fuel_type %in% c("Gas")) %>%
