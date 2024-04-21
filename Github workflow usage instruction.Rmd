@@ -31,63 +31,25 @@ Details about these functions can be found in Data processing.R file in this rep
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 # Loading Packages --------------------------------------------------------
 library(ggplot2)
+library(purrr)
+library(vegan)
 library(readxl)
 library(tidyverse)
 library(dplyr)
 library(data.table)
-library(Hmisc)
-library(bestNormalize)
-```
+library(writexl)
+library(tidyr)
+library(grid)
+library(gridExtra)
+library(stats)
+library(FactoMineR)
+library(factoextra)
+library(compositions)
+library(ggforce)
+library(latticeExtra)
+library(cluster)
 
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
 # Functions -------------------------------------------------------------------------------------------------------
-filtering <- function(df, filter_list) {
-  clean_data <-  copy(df)
-  for (ele in filter_list) {
-    clean_data <- clean_data %>%
-      filter(!grepl(ele, Compound))
-  }
-  return(clean_data)
-}
-
-# Filtering limit of observations
-limit_obser <- function(df_list, file_list, cap) {
-  df_list_filter_area <- list()
-  df_list_removed_area <- list()
-  for (i in 1:length(df_list)) {
-    df_list_filter_area[[i]] <- df_list[[i]] %>%
-      filter(., Area > cap) %>%
-      mutate(sample_name = file_list[[i]]) %>%
-      # Grouping samples into fuel types
-      mutate(fuel_type = ifelse(str_detect(sample_name, "DieselComp"), "DieselComp", 
-                                ifelse(str_detect(sample_name, "GasComp"), "GasComp",
-                                       ifelse(str_detect(sample_name, "D"), "Diesel", "Gas")))) %>%
-      # Grouping samples into respective Gas stations
-      mutate(gas_station = ifelse(str_detect(sample_name, "F009"), "Station_6", 
-                                  ifelse(str_detect(sample_name, "F001"), "Station_1",
-                                         ifelse(str_detect(sample_name, "F007"), "Station_4", 
-                                                ifelse(str_detect(sample_name, "F005"), "Station_3", 
-                                                       ifelse(str_detect(sample_name, "F003"), "Station_2", 
-                                                              ifelse(str_detect(sample_name, "F008"), "Station_5", "Composite")))))))
-    
-    df_list_removed_area[[i]] <- df_list[[i]] %>%
-      filter(., Area <= cap) %>%
-      mutate(sample_name = file_list[[i]]) %>%
-      # Grouping samples into fuel types
-      mutate(fuel_type = ifelse(str_detect(sample_name, "DieselComp"), "DieselComp", 
-                                ifelse(str_detect(sample_name, "GasComp"), "GasComp",
-                                       ifelse(str_detect(sample_name, "D"), "Diesel", "Gas")))) %>%
-      # Grouping samples into respective Gas stations
-      mutate(gas_station = ifelse(str_detect(sample_name, "F009"), "Station_6", 
-                                  ifelse(str_detect(sample_name, "F001"), "Station_1",
-                                         ifelse(str_detect(sample_name, "F007"), "Station_4", 
-                                                ifelse(str_detect(sample_name, "F005"), "Station_3", 
-                                                       ifelse(str_detect(sample_name, "F003"), "Station_2", 
-                                                              ifelse(str_detect(sample_name, "F008"), "Station_5", "Composite")))))))
-  }
-  return(list(df_list_filter_area, df_list_removed_area))
-}
-
 # Notin function
 `%notin%` <- Negate(`%in%`)
 
@@ -104,7 +66,7 @@ grouping_comp_ver1 <- function(data, rt1thres, rt2thres, ion1thres, ion2thres) {
     arrange(RT1, RT2)
   
   # Initialize the compound column filled with NA values
-  dat$collapsed_compound <- NA
+  dat$Feature <- NA
   i <- 1
   
   for (row in 1:nrow(dat)) {
@@ -118,13 +80,13 @@ grouping_comp_ver1 <- function(data, rt1thres, rt2thres, ion1thres, ion2thres) {
                          dat$RT2 <= (rt2 + rt2thres) & dat$RT2 >= (rt2 - rt2thres) & 
                          dat$Ion1 <= (ion1 + ion1thres) & dat$Ion1 >= (ion1 - ion1thres) & 
                          dat$Ion2 <= (ion2 + ion2thres) & dat$Ion2 >= (ion2 - ion2thres) &
-                         is.na(dat$collapsed_compound))
+                         is.na(dat$Feature))
     
     if (identical(idx_thres, integer(0))) {
       next
     }
     else {
-      dat[idx_thres, "collapsed_compound"] <- paste0("Compound_", i, ".")
+      dat[idx_thres, "Feature"] <- paste0("Compound_", i, ".")
       i <- i + 1
     }  
   }
@@ -132,14 +94,15 @@ grouping_comp_ver1 <- function(data, rt1thres, rt2thres, ion1thres, ion2thres) {
   return(dat)
 }
 
-# Filtering similar and unique compound
-comp_filter_ver1 <- function(data) {
+# Filtering similar and unique compound 
+
+comp_filter <- function(data) {
   all_other_compounds_idx <- c()
   all_unique_compounds_idx <- c()
 
-  for (comp_grp in unique(data$collapsed_compound)) {
+  for (comp_grp in unique(data$Feature)) {
     # filter data by indexing, ALWAYS DO THIS INSTEAD OF CREATE SUBSET DATAFRAME
-    idx <- which(grepl(comp_grp, data$collapsed_compound, fixed = TRUE))
+    idx <- which(grepl(comp_grp, data$Feature, fixed = TRUE))
     
     if (length(idx) < 2) {
       all_unique_compounds_idx <- c(all_unique_compounds_idx, idx)
@@ -149,83 +112,79 @@ comp_filter_ver1 <- function(data) {
   }
   return(list(all_other_compounds_idx, all_unique_compounds_idx))
 }
-
-add_data_normalization <- function(data) {
-  temp_list <- list()
-  i <- 1
-  for (sample in unique(data$sample_name)) {
-    df <- data[which(data$sample_name == sample),] %>%
-      # TSN - Percent-based normalization
-      mutate(Percent_Area = Area/sum(.$Area)) %>%
-      mutate(Log_Area = log10(Area)) %>%
-      mutate(boxcox_area = bestNormalize::boxcox(Area)$x.t)
-    temp_list[[i]] <- df
-    i <- i + 1
-  }
-  # Then combine data again to 1 grand data frame
-  newdata <- dplyr::bind_rows(temp_list)
-  return(newdata)
-}
 ```
 
+
+# STEP 1.1: Data import
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-# STEP 1.1: Data import --------------------------------------------
-setwd( "C:/Users/huyng/OneDrive - Toronto Metropolitan University/Huy Nguyen/PhD_EnSciMan_Ryerson_University/Arson project/Rproject/data")
+ASTM_list <- read_xlsx("ASTM Compound List.xlsx")
+file_path <- "Gasolines_BOP_110424.xlsx"
 
-file_list <- list.files(path = "C:/Users/huyng/OneDrive - Toronto Metropolitan University/Huy Nguyen/PhD_EnSciMan_Ryerson_University/Arson project/Rproject/data",
-                        pattern = '*.xlsx')
+dfs <- excel_sheets(file_path) %>%
+  set_names() %>%
+  map(~ read_excel(file_path, sheet = .x) %>% mutate(Sample_name = .x))
 
-# Pipe operator for isolating IL types
-ILR_file_list <- file_list %>%
-  .[!str_ends(., "check.xlsx")] %>%
-  .[!str_detect(., "grouping_compounds")] %>%
-  .[!str_detect(., "Station")] %>%
-  .[!str_detect(., "Workflow")] %>%
-  .[!str_detect(., "ASTM")] %>%
-  .[!str_detect(., "Comp")] %>%
-  .[!str_detect(., "data_table")]
+df_step1.1 <- bind_rows(dfs) %>%
+  select(-c("MF", "RMF", "Area %")) %>%
+  mutate(Octane_rating = ifelse(str_detect(Sample_name, "A"), "Gas_87", 
+                              ifelse(str_detect(Sample_name, "B"), "Gas_89",
+                                     ifelse(str_detect(Sample_name, "C"), "Gas_91", "Gas_94")))) %>%
+  mutate(samp_event = ifelse(str_detect(Sample_name, "b"), "blue",
+                             ifelse(str_detect(Sample_name, "p"), "purple", "orange")))
 
-ASTM_list <- read_xlsx(paste0("C:/Users/huyng/OneDrive - Toronto Metropolitan University/Huy Nguyen/PhD_EnSciMan_Ryerson_University/Arson project/Rproject/data", "/ASTM Compound List.xlsx"))
+# modify columns names
+colnames(df_step1.1)[2] <- "RT1"
+colnames(df_step1.1)[3] <- "RT2"
+colnames(df_step1.1)[6] <- "Ion3"
+colnames(df_step1.1)[8] <- "Ion1"
+colnames(df_step1.1)[9] <- "Ion2"
+```
 
-# Import IL samples to list
-df_list_step1.1 <- purrr::map(ILR_file_list, read_xlsx,
-                              sheet = "Results")
+# STEP 1.2: Filtering out column bleed, solvent and BTEX and minimum area observations
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+filter_list <- c("^Carbon disulfide$", 
+                "Cyclotrisiloxane..hexamethyl",
+                "^Benzene$",
+                "^Toluene$",
+                "^Ethylbenzene$",
+                "Xylene")
 
-# remove spaces in column names in df_list_step1.1
-for (i in 1:length(df_list_step1.1)) {
-  colnames(df_list_step1.1[[i]]) <- gsub(" ", "", colnames(df_list_step1.1[[i]]))
+df_step1.2 <- copy(df_step1.1)
+for (filter_comp in filter_list) {
+  df_step1.2 <- df_step1.2 %>%
+      filter(!grepl(filter_comp, Compound))
 }
 
-# STEP 1.2A: Filtering out column bleed, solvent and BTEX and minimum area observations--------------------------------------
-  
-df_step1.2 <- purrr::map(df_list_step1.1, filtering, filter_list = c("^Carbon disulfide$", 
-                                                                     "Cyclotrisiloxane..hexamethyl",
-                                                                     "Cyclotetrasiloxane..octamethyl",
-                                                                     "^Benzene$",
-                                                                     "^Toluene$",
-                                                                     "^Ethylbenzene$",
-                                                                     "Xylene"))
 
-# STEP 1.2B Filtering out limit of observations----------------------------
-list_remaining_area <- limit_obser(df_step1.2, ILR_file_list, cap = 50000)[[1]]
-list_removed_area <- limit_obser(df_step1.2, ILR_file_list, cap = 50000)[[2]]
+bm_df <- df_step1.1 %>% 
+  filter(grepl("Toluene-D8", Compound)) %>%
+  filter(RT2 >= 3 & RT2 <= 5)
 
-# STEP 1.3: Grouping compounds based on RT1, RT2, Ion1 -----------------------------------------------------------------------
-df_step1.3 <- bind_rows(list_remaining_area)
+# Examining Retention time fluctuation of Toluene benchmark 
+# RT1 hist plot 
+hist(as.numeric(bm_df$RT1), breaks = 10, 
+     xlab = "RT1", ylab ="", cex.axis = 2, cex.lab = 2, cex.main = 2,
+     main = "Toluene")
 
-rt10.1 <- grouping_comp_ver1(df_step1.3,
-                             rt1thres = 0.1,
+# RT2 hist plot 
+hist(as.numeric(bm_df$RT2), 
+     xlab = "RT2", ylab ="", cex.axis = 2, cex.lab = 2, cex.main = 2,
+     main = "Toluene")
+```
+
+# STEP 2: Grouping compounds based on RT1, RT2, Ion1, Ion2
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+
+rt10.1 <- grouping_comp_ver1(df_step1.2 %>% arrange(RT1, RT2),
+                             rt1thres = 0.2,
                              rt2thres = 0.15,
                              ion1thres = 0.05, # Ion 1 and 2 indicates molecular structure (2 most prevalent mass-to-charge)
                              ion2thres = 0.05)
 
 # STEP 2: Identify shared and unique compound groups across samples ================================================================================
-filter_rt10.1 <- comp_filter_ver1(comp_normalized_rt10.1)
+filter_rt10.1 <- comp_filter(rt10.1)
 
-shared_comp_rt10.1 <- comp_normalized_rt10.1[filter_rt10.1[[1]],]
-
-# STEP 3: Data Normalization ------------------------------------------------
-comp_normalized_rt10.1 <- add_data_normalization(rt10.1)
+shared_comp_rt10.1 <- rt10.1[filter_rt10.1[[1]],]
 ```
 
 ### Confirming ASTM at each step of Data processing
@@ -259,156 +218,290 @@ count_ASTM(comp_normalized_rt10.1, ASTM_list, which_step = "STEP 2")
 count_ASTM(shared_comp_rt10.1, ASTM_list, which_step = "STEP 3")
 ```
 
+# STEP 3: Missing value imputation
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+normalized_df <- shared_comp_rt10.1 %>%
+    dplyr::select(Sample_name,
+                  Octane_rating,
+                  samp_event,
+                  Feature,
+                  Area) %>%
+    # since we have multiple different values of the same compound in some samples, we summarize these values by taking the mean of them
+    dplyr::group_by(
+      Sample_name,
+      Octane_rating,
+      samp_event,
+      Feature) %>%
+    dplyr::summarise(across(Area, base::mean)) %>%
+    tidyr::pivot_wider(names_from =  Feature,
+                       values_from = Area) %>%
+    mutate(gas_station = ifelse(str_detect(Sample_name, "F001"), "Station_1",
+                                ifelse(str_detect(Sample_name, "F002"), "Station_2",
+                                       ifelse(str_detect(Sample_name, "F003"), "Station_3",
+                                              ifelse(str_detect(Sample_name, "F004"), "Station_4",
+                                                     ifelse(str_detect(Sample_name, "F005"), "Station_5",
+                                                            ifelse(str_detect(Sample_name, "F006"), "Station_6",
+                                                                   ifelse(str_detect(Sample_name, "F007"), "Station_7",
+                                                                          ifelse(str_detect(Sample_name, "F008"), "Station_8",
+                                                                                 ifelse(str_detect(Sample_name, "F009"), "Station_9", "Station_10")))))))))) %>%
+    tibble::column_to_rownames(., var="Sample_name") %>% 
+    relocate(Octane_rating, samp_event, gas_station, .after = 1)
+
+## REMOVING COMPOUND THAT APPEAR IN ONLY 1 SAMPLE ------------
+unique_col <- c()
+for (col in 3:ncol(normalized_df)) {
+  if (sum(!is.na(normalized_df[,col])) == 1) {
+    unique_col <- c(unique_col, col)
+  }
+}
+
+normalized_df <- normalized_df[, -unique_col]
+
+## REMOVE COMPOUNDS THAT HAVE >90% MISSING VALUES ----------------
+col_90 <- c()
+for (col in 3:ncol(normalized_df)) {
+  if (sum(!is.na(normalized_df[,col]))/length(normalized_df[,col]) < 0.1) {
+    col_90 <- c(col_90, col)
+  }
+}
+
+normalized_df <- normalized_df[, -col_90]
+
+## SELECT TOP 150 COMPOUNDS THAT HAVE HIGHEST CUMULATIVE PEAK AREA ACROSS ALL SAMPLES ---------------
+# Compute the sum of values of each column
+column_sums <- colSums(normalized_df[,3:ncol(normalized_df)])
+
+# Order the columns based on their sum values
+ordered_columns <- order(column_sums, decreasing = TRUE)
+
+## Select the top 100 columns with the highest sum value ----------------
+top_100_columns <- names(column_sums)[ordered_columns[1:100]]
+
+# Create a new dataframe with only the top 100 columns
+normalized_df <- normalized_df[, c("Octane_rating", "samp_event",top_100_columns)]
+
+## SELECT TOP 150 COMPOUNDS THAT HAVE HIGHEST Variance of ACROSS ALL SAMPLES ------------
+# Compute variance of values for each column
+variances <- apply(normalized_df[,3:ncol(normalized_df)], 2, var)
+
+# Sort variances in descending order and get the indices of the top 100 columns
+top_100_indices <- order(variances, decreasing = TRUE)[1:100]
+
+# Select the top 100 columns with highest variance values
+top_100_variance <- normalized_df[, c(1, 2, top_100_indices)]
+
+```
+
+## Option 1: Zero
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+for (r in 1:nrow(normalized_df)) {
+  normalized_df[r, which(base::is.na(normalized_df[r,]))] <- 0
+}
+```
+
+## Option 2: Minimum 
+```{r , echo=FALSE, warning = FALSE, message=FALSE}
+for (r in 1:nrow(normalized_df)) { 
+  normalized_df[r, which(base::is.na(normalized_df[r,]))] <- min(shared_comp_rt10.1$Area)
+} 
+
+```
+
+## Option 3: LOD 
+LOD = Multiply the lowest values of each sample by 3
+
+```{r , echo=FALSE, warning = FALSE, message=FALSE}
+for (r in 1:nrow(normalized_df[, 3:ncol(normalized_df)])) { 
+  normalized_df[, 3:ncol(normalized_df)][r, which(base::is.na(normalized_df[, 3:ncol(normalized_df)][r,]))] <- 3*min(normalized_df[, 3:ncol(normalized_df)][r, which(!base::is.na(normalized_df[, 3:ncol(normalized_df)][r,]))])
+} 
+
+```
+
+# STEP 4: Data Normalization
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+for (i in 1:length(normalized_df)) {
+  comp_normalized_rt10.1 <- as.data.frame(t(apply(normalized_df[, 4:ncol(normalized_df)],
+                                                  MARGIN = 1, 
+                                                  function(row) {row/sum(row, na.rm = TRUE)}))) 
+}
+
+comp_normalized_rt10.1 <- comp_normalized_rt10.1 %>% 
+  mutate(Octane_rating = normalized_df$Octane_rating) %>%
+  mutate(sampling_season = normalized_df$samp_event) %>%
+  mutate(gas_station = normalized_df$gas_station)
+```
+
+# Export file for ML
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+writexl::write_xlsx(comp_normalized_rt10.1, path = paste0(getwd(), "/arson.xlsx"))
+```
+
+
+# Clustering analyses
+## ANOVA 
+(Update 15 April 2024:) 
+*** With Zero imputation 
+1. There is no difference between sampling seasons
+                Df    Sum Sq   Mean Sq F value Pr(>F)
+sampling_season  2 2.370e-31 1.184e-31   0.603   0.55
+Residuals       68 1.335e-29 1.963e-31   
+
+2. There is no difference between Octane rating
+              Df    Sum Sq   Mean Sq F value Pr(>F)
+Octane_rating  3 1.800e-32 6.160e-33    0.03  0.993
+Residuals     67 1.356e-29 2.025e-31 
+
+*** With global minimum imputation
+1. There is no difference between sampling seasons
+                Df    Sum Sq   Mean Sq F value Pr(>F)
+sampling_season  2 6.710e-27 3.354e-27   1.222  0.301
+Residuals       68 1.866e-25 2.744e-27  
+
+2. There is no difference between Octane rating
+              Df   Sum Sq   Mean Sq F value Pr(>F)
+Octane_rating  3 2.28e-27 7.603e-28   0.267  0.849
+Residuals     67 1.91e-25 2.851e-27
+
+==> WHAT's NEXT?: Try to remove compound that appear in only 1 sample and run ANOVA//PCA again
+
+!!! After removing unique cols
+*** With Zero imputation
+1. There is no difference between sampling seasons
+                Df    Sum Sq   Mean Sq F value Pr(>F)
+sampling_season  2 8.280e-31 4.141e-31   1.354  0.265
+Residuals       68 2.079e-29 3.058e-31 
+
+2. There is no difference between Octane rating
+              Df    Sum Sq   Mean Sq F value Pr(>F)
+Octane_rating  3 4.420e-31 1.473e-31   0.466  0.707
+Residuals     67 2.118e-29 3.161e-31 
+
+*** With global minimum imputation 
+1. There is no difference between sampling seasons
+                Df    Sum Sq   Mean Sq F value  Pr(>F)   
+sampling_season  2 2.539e-26 1.269e-26    6.71 0.00219 **
+Residuals       68 1.286e-25 1.892e-27                   
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1 
+
+2. There is no difference between Octane rating
+              Df    Sum Sq   Mean Sq F value Pr(>F)
+Octane_rating  3 3.250e-27 1.085e-27   0.482  0.696
+Residuals     67 1.508e-25 2.250e-27
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+summary(aov(as.formula(paste(paste(setdiff(names(comp_normalized_rt10.1 %>%
+                                             select(-"Octane_rating")), "sampling_season"), collapse = "+"), " ~ sampling_season")), data = comp_normalized_rt10.1 %>%
+                                             select(-"Octane_rating")))
+```
+
 ## PCA
 
-### Gas versus Diesel
+(Update 15 April 2024:) When using either Octane_rating OR sampling_season, there is no clustering whatsoever between seasons OR Octane rate
+
+!!! After removing unique cols
+*** With global minimum imputation:
+
+!! Tried top 150 compounds with highest cumulative peak area => still no clustering on both sampling seasons and octane rating.
+
+!! Tried top 150 compounds with highst variance 
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-library(PCAtools)
-library(FactoMineR)
-
-# Research Question 1 PCA -----------------
-# category 5 >=2 Gas and /or >=2 Diesel data pts 
-df_pca_rq1 <- function(data) {
-  cat_5 <- data %>%
-    filter(., fuel_type %in% c("Gas", "Diesel")) %>%
-    select(sample_name, collapsed_compound, Percent_Area, fuel_type) %>%
-    # since we have duplicates with different values of the same compound in some samples, we summarize these values by taking the mean of them
-    group_by(sample_name, collapsed_compound, fuel_type) %>%
-    summarise(across(Percent_Area, mean)) %>%
-    pivot_wider(names_from = collapsed_compound, values_from = Percent_Area)
-  
-  # Filter any compound that has > 90% NAs
-  colid_90_na <- c()
-  for (i in 3:ncol(cat_5)) {
-    if (length(which(!is.na(cat_5[, i])))/nrow(cat_5[, i]) < 0.1) {
-      colid_90_na <- c(colid_90_na, i)
-    }
-  }
-  
-  cat_5_new <- cat_5[, -colid_90_na]
-  
-  for (r in 1:nrow(cat_5_new)) { 
-    cat_5_new[r, which(base::is.na(cat_5_new[r,]))] <- 0 
-  }
-
-  
-  return(cat_5_new)
-}
-
-df_pca_rq1_rt10.1 <- df_pca_rq1(shared_comp_rt10.1)
 
 res.pca <- FactoMineR::PCA(
-  df_pca_rq1_rt10.1[, 3:ncol(df_pca_rq1_rt10.1)],
+  comp_normalized_rt10.1 %>% select(-c("sampling_season", "Octane_rating", "gas_station")),
+  # clr_transformed_pca,
   scale.unit = FALSE,
   graph = FALSE)
 
+# Scree plot
+fviz_screeplot(res.pca, ncp=10)
+
+# Biplot
 factoextra::fviz_pca_biplot(res.pca,  
                             geom = c("point", "text"),
                             label = "none", 
                             invisible = "var", 
                             repel = TRUE,
-                            labelsize = 6, 
-                            habillage = factor(df_pca_rq1_rt10.1$fuel_type),
+                            labelsize = 10, 
+                            habillage = factor(comp_normalized_rt10.1$gas_station),
                             addEllipses = TRUE,
-                            ellipse.level=0.95,
-                            ggtheme = ggplot2::theme_minimal(base_size = 15),
-                            title = "Plastic Sample"
+                            ellipse.level = 0.95,
+                            ggtheme = ggplot2::theme_minimal(base_size = 20),
+                            title = ""
                             ) + 
   # if has error "Too few points to calculate an ellipse"
   # ggforce::geom_mark_ellipse(aes(fill = Groups,
   #                                color = Groups),
   #                            label.buffer = unit(40, 'mm')) +
-  theme(legend.position = 'bottom') 
-  # + coord_equal()
+  theme(legend.position = 'bottom') + coord_equal()
+
 ```
 
-### Between groups of gas stations
+## t-SNE
+```{r, echo=FALSE, warning = FALSE, message=FALSE}
+# REFERENCES VISUALIZATION: 
+# https://plotly.com/r/t-sne-and-umap-projections/
+# https://distill.pub/2016/misread-tsne/
 
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
-# Research Question 2 PCA ##########################
-# Category 2: Compounds that have >=2 data points for each gas stations
-df_pca_rq2 <- function(data) {
-  mydata2 <- data %>%
-    filter(., fuel_type %in% "Gas") %>%
-    select(sample_name, collapsed_compound, Percent_Area, gas_station) %>%
-    # since we have duplicates with different values of the same compound in some samples, we summarize these values by taking the mean of them
-    group_by(sample_name, collapsed_compound, gas_station) %>%
-    summarise(across(Percent_Area, mean)) %>%
-    pivot_wider(names_from = collapsed_compound, values_from = Percent_Area)
+library(tsne)
+library(plotly)
 
-  # Filter any compound that has > 90% NAs
-  colid_90_na <- c()
-  for (i in 3:ncol(mydata2)) {
-    if (length(which(!is.na(mydata2[, i])))/nrow(mydata2[, i]) < 0.1) {
-      colid_90_na <- c(colid_90_na, i)
-    }
-  }
-  
-  mydata2_new <- mydata2[, -colid_90_na]
-  
-  for (r in 1:nrow(mydata2_new)) { 
-    mydata2_new[r, which(base::is.na(mydata2_new[r,]))] <- 0 
-  }
+dat <- comp_normalized_rt10.1
 
-  return(mydata2_new)
-}  
+features <- subset(dat, select = -c(sampling_season, Octane_rating))
 
-df_pca_rq2_rt10.1 <- df_pca_rq2(shared_comp_rt10.1)
+tsne <- tsne(features,
+             initial_dims = 3, 
+             k = 3, 
+             perplexity = 20, # Hyperparameter: perplexity (optimal number of neighbors) < number of samples
+             max_iter = 5000
+             )
 
-# Conduct principal component analysis (PCA):
-res.pca <- FactoMineR::PCA(
-  df_pca_rq2_rt10.1[, 3:ncol(df_pca_rq2_rt10.1)],
-  scale.unit = FALSE,
-  graph = FALSE)
+pdb <- cbind(data.frame(tsne), comp_normalized_rt10.1$Octane_rating)
+options(warn = -1)
+tsne_plot <- plot_ly(data = pdb ,x =  ~X1, y = ~X2, z = ~X3, 
+               color = ~comp_normalized_rt10.1$Octane_rating) %>% 
+  add_markers(size = 8) %>%
+  layout( 
+    xaxis = list(
+      zerolinecolor = "#ffff",
+      zerolinewidth = 2,
+      gridcolor='#ffff'), 
+    yaxis = list(
+      zerolinecolor = "#ffff",
+      zerolinewidth = 2,
+      gridcolor='#ffff'),
+    scene =list(bgcolor = "#e5ecf6"))
 
-factoextra::fviz_pca_biplot(res.pca,  
-                            geom = c("point", "text"),
-                            label = "none", 
-                            invisible = "var", 
-                            repel = TRUE,
-                            labelsize = 6, 
-                            habillage = factor(df_pca_rq2_rt10.1$gas_station),
-                            addEllipses = TRUE,
-                            ellipse.level=0.95,
-                            ggtheme = ggplot2::theme_minimal(base_size = 15),
-                            title = "Plastic Sample"
-                            ) + 
-  # if has error "Too few points to calculate an ellipse"
-  # ggforce::geom_mark_ellipse(aes(fill = Groups,
-  #                                color = Groups),
-  #                            label.buffer = unit(40, 'mm')) +
-  theme(legend.position = 'bottom') 
-  # + coord_equal()
+tsne_plot
 ```
+
+## UMAP clustering 
+
+```{r, echo=FALSE, warning = FALSE, message=FALSE}
+library(umap)
+
+dat <- comp_normalized_rt10.1 
+
+features <- subset(dat, select = -c(sampling_season, Octane_rating
+                                    ))
+
+umap <- umap(features, n_components = 3,
+             method = 'naive', metric= "manhattan",
+             alpha = 0.0001, gamma = 0.0001)
+
+layout <- cbind(data.frame(umap[["layout"]]), comp_normalized_rt10.1$sampling_season)
+umap_plot <- plot_ly(layout, x = ~X1, y = ~X2, z = ~X3, 
+                color = ~comp_normalized_rt10.1$sampling_season) %>% 
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'x-axis'), 
+                                   yaxis = list(title = 'y-axis'), 
+                                   zaxis = list(title = 'z-axis'))) 
+umap_plot
+```
+
 
 ## Multiple Wilcoxon tests with p-value correction for multiple testing
-
-### Research Question 1: Gas versus Diesel
-
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
-stats_rq1 <- shared_comp_rt10.1  %>%
-  filter(., fuel_type %in% c("Gas", "Diesel")) %>%
-  select(sample_name, collapsed_compound, Percent_Area) %>%
-  mutate(sample_name = factor(sample_name, levels = c(unique(sample_name)))) %>%
-  mutate(collapsed_compound = factor(collapsed_compound, levels = c(unique(collapsed_compound)))) %>%
-  # since we have duplicates with different values of the same compound in some samples, we summarize these values by taking the mean of them
-  group_by(sample_name, collapsed_compound) %>%
-  summarise(across(Percent_Area, mean)) %>%
-  pivot_wider(names_from = sample_name, values_from = Percent_Area) %>%
-  relocate(`0220F001D.xlsx`, `0220F009D.xlsx`, `0220F009-2D.xlsx`, `0220F005D.xlsx`, .after = last_col()) %>%
-  column_to_rownames(., var = "collapsed_compound")
-
-# category 5: >=2 gas and >=2 diesel (multiple testing) --------------------------------------------------------
-cat_5 <- stats_rq1[(rowSums(!is.na(stats_rq1[, 1:21])) >= 2) & 
-                       (rowSums(!is.na(stats_rq1[, 22:25])) >= 2),] # -> 374 out of 4769 compounds
-
-for (r in 1:nrow(cat_5)) { 
-  cat_5[r, which(base::is.na(cat_5[r,]))] <- runif(length(which(base::is.na(cat_5[r,]))),
-                                                       min = sort(shared_comp_rt10.1$Percent_Area)[1]/100000,
-                                                       max = sort(shared_comp_rt10.1$Percent_Area)[2]/100000)
-}
-```
 
 Before running multiple Wilcoxon tests, it is recommended to examine whether criteria for univariate parametric test, such as t-test, are violated. If yes, then it is safe to proceed using non-parametric univariate test, such as Wilcoxon test.
 
@@ -445,353 +538,34 @@ stats::fligner.test(data ~ group, data = non_norm_dist_data)
 ```
 Here, multiple Wilcoxon tests followed by p-value correction for multiple testing was done. Different method for p-value correction from function *p.adjust* from package **stats** were used. After p-value correction, the threshold for p-value can be set (for example,p.adjust \< 0.05 or \< 0.1), to see how it affects the number of significant compounds that can be found. Importantly, the threshold should be set so that it can include as many ASTM reference compounds in the list of significant compounds as possible. For example here, no significant compounds can be found with adjusted p-value \< 0.05. But when adjusted p-value is \< 0.1, 127 significant compounds are found.
 
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
-# Wilcoxon Test ========================================================================================
-pvalue.w <- c()
 
-for (i in 1:nrow(cat_5)) { 
-  pvalue.w[i] <- wilcox.test(as.numeric(cat_5[i, c(1:21)]), as.numeric(cat_5[i, c(22:25)]))$p.value
+### Between gas station
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+
+df <- data.frame(Feature=character(), comparison_pair=character(), pval_wilcox_test=integer())
+
+comp_normalized_rt10.1_filtered <- comp_normalized_rt10.1[!(comp_normalized_rt10.1$gas_station %in% names(table(comp_normalized_rt10.1$gas_station)[table(comp_normalized_rt10.1$gas_station) < 3])),] %>% 
+  select(-c("Octane_rating", "sampling_season")) %>%
+  relocate(gas_station, .before = 1)
+
+for (c in 2:ncol(comp_normalized_rt10.1_filtered)) {      
+  # looping through the combinations of product categories 
+  for (col in 1:ncol(utils::combn(unique(comp_normalized_rt10.1_filtered$gas_station), 2))) {
+    # extract the combinations of product category pairs
+    p_1 <- utils::combn(unique(comp_normalized_rt10.1_filtered$gas_station), 2)[1,col]
+    p_2 <- utils::combn(unique(comp_normalized_rt10.1_filtered$gas_station), 2)[2,col]
+    
+    # calculating the p-value between each product category pair 
+    pval_wilcox_test <- wilcox.test(as.numeric(unlist(tempdf_filtered[which(comp_normalized_rt10.1_filtered$gas_station == p_1), c])), 
+                                    as.numeric(unlist(tempdf_filtered[which(comp_normalized_rt10.1_filtered$gas_station == p_2), c])))$p.value
+    # assigning row information
+    df[nrow(df) + 1,] <- c(colnames(dat)[c], 
+                           paste0(p_1, " & ", p_2), 
+                           pval_wilcox_test)
+  }
 }
-
-summary_table <- cbind(rownames(cat_5), as.data.frame(pvalue.w))
-colnames(summary_table) <- c("collapsed_compound", "pvalue")
-
-summary_table$adjusted_pvalue_holm <- stats::p.adjust(summary_table$pvalue, method = "holm")
-summary_table$adjusted_pvalue_hochberg <- stats::p.adjust(summary_table$pvalue, method = "hochberg")
-summary_table$adjusted_pvalue_hommel <- stats::p.adjust(summary_table$pvalue, method = "hommel")
-summary_table$adjusted_pvalue_bonferroni <- stats::p.adjust(summary_table$pvalue, method = "bonferroni")
-summary_table$adjusted_pvalue_BH <- stats::p.adjust(summary_table$pvalue, method = "BH")
-summary_table$adjusted_pvalue_BY <- stats::p.adjust(summary_table$pvalue, method = "BY")
-summary_table$adjusted_pvalue_fdr <- stats::p.adjust(summary_table$pvalue, method = "fdr")
-
-rq1_p0.05 <- summary_table %>%
-  filter(., adjusted_pvalue_holm < 0.05)
-
-paste0("Number of significant compounds with adjusted p-value < 0.05 = ", dim(rq1_p0.05)[1])
-
-rq1_p0.1 <- summary_table %>%
-  filter(., adjusted_pvalue_holm < 0.1) %>%
-  arrange(adjusted_pvalue_holm)
-
-paste0("Number of significant compounds with adjusted p-value < 0.1 = ", dim(rq1_p0.1)[1])
-
-
-View(shared_comp_rt10.1  %>%
-  filter(., fuel_type %in% c("Gas", "Diesel")) %>%
-  filter(., collapsed_compound %in% unique(rq1_p0.1$collapsed_compound)))
-
-export_rq1 <- shared_comp_rt10.1  %>%
-  filter(., fuel_type %in% c("Gas", "Diesel")) %>%
-  filter(., collapsed_compound %in% unique(rq1_p0.1$collapsed_compound)) %>%
-  filter(., collapsed_compound %notin% c("Compound_7036.", "Compound_2600.", "Compound_1300.", "Compound_6023.",
-                                         "Compound_5849.", "Compound_5728.", "Compound_3702.", "Compound_3841.", 
-                                         "Compound_2437.", "Compound_2285.", "Compound_1980.", "Compound_1804.", 
-                                         "Compound_1721.", "Compound_1671.", "Compound_1650.", "Compound_1887.")) %>%
-  group_by(collapsed_compound) %>%
-  summarise(., mean_rt1 = round(mean(RT1), 3),
-            mean_rt2 = round(mean(RT2), 3),
-            mean_ion1 = round(mean(Ion1), 2), 
-            mean_ion2 = round(mean(Ion2), 2))
-
-writexl::write_xlsx(x = export_rq1, path = paste0(getwd(), "/significant beyond ASTM compound_RQ1.xlsx"))
 ```
 
-### Research Question 2: Distinguishing samples from groups of gas stations
+### Between sampling seasons
 
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
-df_rq2 <- function(data) {
-  mydata2 <- data %>%
-    filter(., fuel_type %in% "Gas") %>%
-    select(sample_name, collapsed_compound, Percent_Area) %>%
-    mutate(sample_name = factor(sample_name, levels = c(unique(sample_name)))) %>%
-    mutate(collapsed_compound = factor(collapsed_compound, levels = c(unique(collapsed_compound)))) %>%
-    # since we have duplicates with different values of the same compound in some samples, we summarize these values by taking the mean of them
-    group_by(sample_name, collapsed_compound) %>%
-    summarise(across(Percent_Area, mean)) %>%
-    pivot_wider(names_from = sample_name, values_from = Percent_Area) %>%
-    column_to_rownames(., var = "collapsed_compound")
-  
-  # transpose the rows and columns
-  transpose_mydata2 <- data.table::transpose(mydata2)
-  rownames(transpose_mydata2) <- colnames(mydata2)
-  colnames(transpose_mydata2) <- rownames(mydata2)
-  transpose_mydata2 <- transpose_mydata2 %>%
-    rownames_to_column(., var = "sample_name")
-  
-  transpose_mydata2_new <- transpose_mydata2 %>%
-    # # Grouping samples into respective Gas stations
-    mutate(gas_station = ifelse(str_detect(sample_name, "F009"), "Station_6", 
-                                  ifelse(str_detect(sample_name, "F001"), "Station_1",
-                                         ifelse(str_detect(sample_name, "F007"), "Station_4", 
-                                                ifelse(str_detect(sample_name, "F005"), "Station_3", 
-                                                       ifelse(str_detect(sample_name, "F003"), "Station_2", 
-                                                              ifelse(str_detect(sample_name, "F008"), "Station_5", "Composite"))))))) %>%
-    relocate(gas_station, .after = sample_name)
-  
-  # Category 1 (rq2_cat1) : Compound found in only 1 gas station and not in any other
-  rq2_cat1 <- data.frame(matrix(nrow = nrow(transpose_mydata2_new)))
-  # Category 2 (rq2_cat2): Compound found in >=2 gas stations
-  rq2_cat2 <- data.frame(matrix(nrow = nrow(transpose_mydata2_new)))
-  
-  # if compounds has only 1 record
-  rq2_cat1 <- transpose_mydata2_new[,3:ncol(transpose_mydata2_new)][,colSums(!is.na(transpose_mydata2_new[,3:ncol(transpose_mydata2_new)])) == 1]
-  # if compounds has 2 record
-  temp_1 <- transpose_mydata2_new[,3:ncol(transpose_mydata2_new)][,colSums(!is.na(transpose_mydata2_new[,3:ncol(transpose_mydata2_new)])) == 2]
-  rq2_cat2_col_id <- c()
-  rq2_cat1_col_id <- c()
-  for (col in 1:ncol(temp_1)) {
-    idx1 <- which(!is.na(temp_1[,col]))
-    # if 2 records from 2 different gas stations
-    if (length(unique(transpose_mydata2_new[idx1]$gas_station)) > 1) {
-      rq2_cat2_col_id <- c(rq2_cat2_col_id, col)
-    } else { # if 2 records from same gas stations
-      rq2_cat1_col_id <- c(rq2_cat1_col_id, col)
-    }
-  }
-  rq2_cat1 <- base::cbind(rq2_cat1, temp_1[, rq2_cat1_col_id])
-  rq2_cat2 <- temp_1[, rq2_cat2_col_id]
-  # if compounds have 3 records
-  temp_2 <- transpose_mydata2_new[,3:ncol(transpose_mydata2_new)][,colSums(!is.na(transpose_mydata2_new[,3:ncol(transpose_mydata2_new)])) == 3]
-  rq2_cat2_col_id <- c()
-  rq2_cat1_col_id <- c()
-  for (col in 1:ncol(temp_2)) {
-    idx2 <- which(!is.na(temp_2[,col]))
-    # if 3 records from different gas stations
-    if (length(unique(transpose_mydata2_new[idx2,]$gas_station)) > 1) {
-      rq2_cat2_col_id <- c(rq2_cat2_col_id, col)
-    } else {  # if 3 records from same gas stations
-      rq2_cat1_col_id <- c(rq2_cat1_col_id, col)
-    }
-  }
-  rq2_cat1 <- base::cbind(rq2_cat1, temp_2[, rq2_cat1_col_id])
-  rq2_cat2 <- base::cbind(rq2_cat2, temp_2[, rq2_cat2_col_id])
-  
-  # if compounds have >=4 records -> it definitely appear in >=2 Gas stations (712 compounds)
-  temp_3 <- transpose_mydata2_new[,3:ncol(transpose_mydata2_new)][,colSums(!is.na(transpose_mydata2_new[,3:ncol(transpose_mydata2_new)])) > 3]
-  rq2_cat2 <- base::cbind(rq2_cat2, temp_3)
-  
-  # Insert sample name and gas station codes to Cat1 and Cat2 data frames ====================================
-  rq2_cat1 <- base::cbind(rq2_cat1, transpose_mydata2_new[, 1:2]) %>%
-    relocate(sample_name, gas_station, .before = everything())
-  
-  rq2_cat2 <- base::cbind(rq2_cat2, transpose_mydata2_new[, 1:2]) %>%
-    relocate(sample_name, gas_station, .before = everything())
-  
-  # Subset compounds that have >= 2 obs per gas station for Wilcoxon test ------------------------------------------------
-  temp_4 <- base::cbind(temp_3, transpose_mydata2_new[, 1:2]) %>%
-    relocate(sample_name, gas_station, .before = everything())
-  
-  col_id <- c()
-  
-  for (col in 3:ncol(temp_4)) {
-    record_count <- c()
-    idx <- which(!is.na(temp_4[,col]))
-    
-    for (station in unique(temp_4[idx, "gas_station"])) {
-      count <- sum(temp_4[idx,]$gas_station == station)
-      record_count <- c(record_count, count) 
-    }
-    
-    if (sum(record_count >= 2) >= 2) {
-      col_id <- c(col_id, col)
-    } else {
-      next
-    }
-  }
-  
-  # Data frame of compounds that have >= 2 obs per gas station
-  rq2_cat2_stats <- temp_4[, col_id] # 506 compounds
-  
-  # Impute NA with LOD  for RQ1 Category 2: compounds in >=2 Gas stations
-  for (col in 1:ncol(rq2_cat2_stats)) {
-    rq2_cat2_stats[which(is.na(rq2_cat2_stats[,col])), col] <- runif(length(which(is.na(rq2_cat2_stats[,col]))),
-                                                                     min = sort(data$Percent_Area)[1],
-                                                                     max = sort(data$Percent_Area)[2])
-  }
-
-
-  rq2_cat2_stats_imputed <- base::cbind(rq2_cat2_stats, transpose_mydata2_new[, 1:2]) %>%
-    relocate(sample_name, gas_station, .before = everything())
-  
-  return(rq2_cat2_stats_imputed)
-}  
-
-df_stats_rq2_rt10.1 <- df_rq2(shared_comp_rt10.1)
-```
-
-Here again, before running multiple Wilcoxon tests, it is recommended to examine whether criteria for univariate parametric test, such as t-test, are violated. If yes, then it is safe to proceed using non-parametric univariate test, such as Wilcoxon test.
-
-First, equal variance and normally distributed between two populations, here are Gas and Diesel using histogram, Q-Q plots. Here, both Gas station group 1 (1, 5, 2) and Gas station group 2 (3, 4, 6) populations are NOT normally distributed.
-
-Equality of variance between Gas station group 1 (1, 5, 2) and Gas station group 2 (3, 4, 6) populations can be examined using Fligner-Killeen test for non-normally distributed data. Here, p values are \< 0.05, and thus, there is significant difference in variances between Gas station group 1 (1, 3, 8) and Gas station group 2 (5, 7, 9) populations.
-
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
-# Examine whether 2 gas station groups have equal variance and normally distributed.-----------------------------------------------
-gasgr1_Data <- as.vector(t(df_stats_rq2_rt10.1 %>% 
-                             filter(., gas_station %in% c("Station_1", "Station_5", "Station_2")) %>% 
-                             select(., 3:ncol(.))))
-gasgr2_Data <- as.vector(t(df_stats_rq2_rt10.1 %>%
-                             filter(., gas_station %in% c("Station_3", "Station_4", "Station_6")) %>% 
-                             select(., 3:ncol(.))))
-
-# Histogram
-hist(gasgr1_Data, col='steelblue', main='Gas stations 1, 2, 5')
-hist(gasgr2_Data, col='steelblue', main='Gas stations 3, 4, 6')
-
-# Q-Q plots aka. Normal Probability plots
-stats::qqnorm(gasgr1_Data, main='Gas stations 1, 2, 5')
-stats::qqline(gasgr1_Data)
-
-stats::qqnorm(gasgr2_Data, main='Gas stations 3, 4, 6')
-stats::qqline(gasgr2_Data)
-
-# Fligner-Killeen test
-stats::fligner.test(data ~ group, data = non_norm_dist_data)
-```
-
-Here, multiple Wilcoxon tests followed by p-value correction for multiple testing was done. Different method for p-value correction from function *p.adjust* from package **stats** were used. After p-value correction, the threshold for p-value can be set (for example,p.adjust \< 0.05 or \< 0.1), to see how it affects the number of significant compounds that can be found. Importantly, the threshold should be set so that it can include as many ASTM reference compounds in the list of significant compounds as possible. For example here, no significant compounds can be found with adjusted p-value \< 0.05. But when adjusted p-value is \< 0.1, 127 significant compounds are found.
-
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
-# Wilcoxon exact test -----------------------
-
-pvalue.w_rq2 <- c()
-i <- 1
-for (col in 3:ncol(df_stats_rq2_rt10.1)){
-  pvalue.w_rq2[i] <- stats::wilcox.test(as.numeric(df_stats_rq2_rt10.1[which(df_stats_rq2_rt10.1$gas_station %in% c("Station_1", "Station_2", "Station_5")), col]),
-                                        as.numeric(df_stats_rq2_rt10.1[which(df_stats_rq2_rt10.1$gas_station %in% c("Station_3", "Station_4", "Station_6")), col]))$p.value
-  i <- i + 1
-}
-
-rq2_cat2_summary_table <- cbind(colnames(df_stats_rq2_rt10.1[,3:ncol(df_stats_rq2_rt10.1)]), 
-                                as.data.frame(pvalue.w_rq2))
-colnames(rq2_cat2_summary_table) <- c("collapsed_compound", "pvalue")
-
-rq2_cat2_summary_table$adjusted_pvalue_holm <- stats::p.adjust(rq2_cat2_summary_table$pvalue, method = "holm")
-rq2_cat2_summary_table$adjusted_pvalue_hochberg <- stats::p.adjust(rq2_cat2_summary_table$pvalue, method = "hochberg")
-rq2_cat2_summary_table$adjusted_pvalue_hommel <- stats::p.adjust(rq2_cat2_summary_table$pvalue, method = "hommel")
-rq2_cat2_summary_table$adjusted_pvalue_bonferroni <- stats::p.adjust(rq2_cat2_summary_table$pvalue, method = "bonferroni")
-rq2_cat2_summary_table$adjusted_pvalue_BH <- stats::p.adjust(rq2_cat2_summary_table$pvalue, method = "BH")
-rq2_cat2_summary_table$adjusted_pvalue_BY <- stats::p.adjust(rq2_cat2_summary_table$pvalue, method = "BY")
-rq2_cat2_summary_table$adjusted_pvalue_fdr <- stats::p.adjust(rq2_cat2_summary_table$pvalue, method = "fdr")
-
-rq2_cat2_alpha0.05 <- rq2_cat2_summary_table %>%
-  filter(., adjusted_pvalue_holm < 0.05)
-
-paste0("Number of significant compounds with adjusted p-value < 0.05 = ", dim(rq2_cat2_alpha0.05)[1])
-
-rq2_cat2_alpha0.1 <- rq2_cat2_summary_table %>%
-  filter(., adjusted_pvalue_holm < 0.1) %>%
-  arrange(adjusted_pvalue_holm)
-
-paste0("Number of significant compounds adjusted p-value < 0.1 = ", dim(rq2_cat2_alpha0.1)[1])
-
-# View(shared_comp_rt10.1  %>%
-#   filter(., fuel_type %in% "Gas") %>%
-#   filter(., collapsed_compound %in% unique(rq2_cat2_alpha0.05$collapsed_compound)))
-
-export_rq2 <- shared_comp_rt10.1  %>%
-  filter(., fuel_type %in% c("Gas")) %>%
-  filter(., collapsed_compound %in% unique(rq2_cat2_alpha0.05$collapsed_compound)) %>%
-  filter(., collapsed_compound %notin% c("Compound_1300.", "Compound_3742.", "Compound_3118.", "Compound_3076.",
-                                         "Compound_2285.", "Compound_1980.", "Compound_1804.", "Compound_1721.",
-                                         "Compound_1671.", "Compound_1650.", "Compound_1887.")) %>%
-  group_by(collapsed_compound) %>%
-  summarise(., mean_rt1 = round(mean(RT1), 3),
-            mean_rt2 = round(mean(RT2), 3),
-            mean_ion1 = round(mean(Ion1), 2), 
-            mean_ion2 = round(mean(Ion2), 2))
-
-writexl::write_xlsx(x = export_rq2, path = paste0(getwd(), "/significant beyond ASTM compound_RQ2.xlsx"))
-```
-## Reserve code
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
- transpose_mydata2 <- data.table::transpose(mydata2)
-  rownames(transpose_mydata2) <- colnames(mydata2)
-  colnames(transpose_mydata2) <- rownames(mydata2)
-  transpose_mydata2 <- transpose_mydata2 %>%
-    rownames_to_column(., var = "sample_name")
-  
-  transpose_mydata2_new <- transpose_mydata2 %>%
-    # # Grouping samples into respective Gas stations
-    mutate(gas_station = ifelse(str_detect(sample_name, "F009"), "Station_9",
-                                ifelse(str_detect(sample_name, "F001"), "Station_1",
-                                       ifelse(str_detect(sample_name, "F007"), "Station_7",
-                                              ifelse(str_detect(sample_name, "F005"), "Station_5",
-                                                     ifelse(str_detect(sample_name, "F003"), "Station_3",
-                                                            ifelse(str_detect(sample_name, "F008"), "Station_8", "Composite"))))))) %>%
-    relocate(gas_station, .after = sample_name)
-  
-  # Category 1 (rq2_cat1) : Compound found in only 1 gas station and not in any other
-  rq2_cat1 <- data.frame(matrix(nrow = nrow(transpose_mydata2_new)))
-  # Category 2 (rq2_cat2): Compound found in >=2 gas stations
-  rq2_cat2 <- data.frame(matrix(nrow = nrow(transpose_mydata2_new)))
-  
-  # if compounds has only 1 record
-  rq2_cat1 <- transpose_mydata2_new[,3:ncol(transpose_mydata2_new)][,colSums(!is.na(transpose_mydata2_new[,3:ncol(transpose_mydata2_new)])) == 1]
-  # if compounds has 2 record
-  temp_1 <- transpose_mydata2_new[,3:ncol(transpose_mydata2_new)][,colSums(!is.na(transpose_mydata2_new[,3:ncol(transpose_mydata2_new)])) == 2]
-  rq2_cat2_col_id <- c()
-  rq2_cat1_col_id <- c()
-  for (col in 1:ncol(temp_1)) {
-    idx1 <- which(!is.na(temp_1[,col]))
-    # if 2 records from 2 different gas stations
-    if (length(unique(transpose_mydata2_new[idx1]$gas_station)) > 1) {
-      rq2_cat2_col_id <- c(rq2_cat2_col_id, col)
-    } else { # if 2 records from same gas stations
-      rq2_cat1_col_id <- c(rq2_cat1_col_id, col)
-    }
-  }
-  rq2_cat1 <- base::cbind(rq2_cat1, temp_1[, rq2_cat1_col_id])
-  rq2_cat2 <- temp_1[, rq2_cat2_col_id]
-  # if compounds have 3 records
-  temp_2 <- transpose_mydata2_new[,3:ncol(transpose_mydata2_new)][,colSums(!is.na(transpose_mydata2_new[,3:ncol(transpose_mydata2_new)])) == 3]
-  rq2_cat2_col_id <- c()
-  rq2_cat1_col_id <- c()
-  for (col in 1:ncol(temp_2)) {
-    idx2 <- which(!is.na(temp_2[,col]))
-    # if 3 records from different gas stations
-    if (length(unique(transpose_mydata2_new[idx2,]$gas_station)) > 1) {
-      rq2_cat2_col_id <- c(rq2_cat2_col_id, col)
-    } else {  # if 3 records from same gas stations
-      rq2_cat1_col_id <- c(rq2_cat1_col_id, col)
-    }
-  }
-  rq2_cat1 <- base::cbind(rq2_cat1, temp_2[, rq2_cat1_col_id])
-  rq2_cat2 <- base::cbind(rq2_cat2, temp_2[, rq2_cat2_col_id])
-  
-  # if compounds have >=4 records -> it definitely appear in >=2 Gas stations (712 compounds)
-  temp_3 <- transpose_mydata2_new[,3:ncol(transpose_mydata2_new)][,colSums(!is.na(transpose_mydata2_new[,3:ncol(transpose_mydata2_new)])) > 3]
-  rq2_cat2 <- base::cbind(rq2_cat2, temp_3)
-  
-  # Insert sample name and gas station codes to Cat1 and Cat2 data frames ====================================
-  rq2_cat1 <- base::cbind(rq2_cat1, transpose_mydata2_new[, 1:2]) %>%
-    relocate(sample_name, gas_station, .before = everything())
-  
-  rq2_cat2 <- base::cbind(rq2_cat2, transpose_mydata2_new[, 1:2]) %>%
-    relocate(sample_name, gas_station, .before = everything())
-  
-  # Subset compounds that have >= 2 obs per gas station for Wilcoxon test ------------------------------------------------
-  temp_4 <- base::cbind(temp_3, transpose_mydata2_new[, 1:2]) %>%
-    relocate(sample_name, gas_station, .before = everything())
-  
-  col_id <- c()
-  
-  for (col in 3:ncol(temp_4)) {
-    record_count <- c()
-    idx <- which(!is.na(temp_4[,col]))
-    
-    for (station in unique(temp_4[idx, "gas_station"])) {
-      count <- sum(temp_4[idx,]$gas_station == station)
-      record_count <- c(record_count, count) 
-    }
-    
-    if (sum(record_count >= 2) >= 2) {
-      col_id <- c(col_id, col)
-    } else {
-      next
-    }
-  }
-  
-  # Data frame of compounds that have >= 2 obs per gas station
-  rq2_cat2_stats <- temp_4[, col_id] # 506 compounds
-```
+### Between octane rating
