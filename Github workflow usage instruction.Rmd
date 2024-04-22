@@ -104,7 +104,7 @@ comp_filter <- function(data) {
     # filter data by indexing, ALWAYS DO THIS INSTEAD OF CREATE SUBSET DATAFRAME
     idx <- which(grepl(comp_grp, data$Feature, fixed = TRUE))
     
-    if (length(idx) < 2) {
+    if (length(unique(data[idx,]$Sample_name)) < 2) {
       all_unique_compounds_idx <- c(all_unique_compounds_idx, idx)
     } else {
       all_other_compounds_idx <- c(all_other_compounds_idx, idx)
@@ -187,7 +187,10 @@ filter_rt10.1 <- comp_filter(rt10.1)
 shared_comp_rt10.1 <- rt10.1[filter_rt10.1[[1]],]
 ```
 
-### Confirming ASTM at each step of Data processing
+## QUALITY CONTROL 1: Confirming ASTM at each step of Data processing
+
+(UPDATE 22 April 2024:) We don't have ASTM compounds at this step any more, such as Octane, Nonane. Also, THe RT1 of another ASTM compounds "Benzene, propyl-" is ~19.04, which deviates drastically from the normal RT1 of this compound ~14.41 !!!!
+
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 count_ASTM <- function(data, ASTM_list, which_step) {
   count <- 0
@@ -211,129 +214,140 @@ count_ASTM <- function(data, ASTM_list, which_step) {
   print(paste0("The number of ASTM compounds found at ", which_step ," is: ", count))
 }
 
-count_ASTM(bind_rows(df_list_step1.1), ASTM_list, which_step = "STEP 1.1")
-count_ASTM(bind_rows(list_remaining_area), ASTM_list, which_step = "STEP 1.2")
-count_ASTM(rt10.1, ASTM_list, which_step = "STEP 1.3")
-count_ASTM(comp_normalized_rt10.1, ASTM_list, which_step = "STEP 2")
-count_ASTM(shared_comp_rt10.1, ASTM_list, which_step = "STEP 3")
+count_ASTM(df_step1.1, ASTM_list, which_step = "STEP 1.1")
+count_ASTM(bind_rows(bm_df), ASTM_list, which_step = "STEP 1.2")
+count_ASTM(shared_comp_rt10.1, ASTM_list, which_step = "STEP 2")
 ```
 
 # STEP 3: Missing value imputation
+(Update 21 April 2024:) After remove compounds appear in only one sample and compounds that have >90% Missing values -> plot histogram of distribution -> most of compounds are < 2e+06 => try filter all peaks that is >= 2e+06
+
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-normalized_df <- shared_comp_rt10.1 %>%
-    dplyr::select(Sample_name,
-                  Octane_rating,
-                  samp_event,
-                  Feature,
-                  Area) %>%
-    # since we have multiple different values of the same compound in some samples, we summarize these values by taking the mean of them
-    dplyr::group_by(
-      Sample_name,
-      Octane_rating,
-      samp_event,
-      Feature) %>%
-    dplyr::summarise(across(Area, base::mean)) %>%
-    tidyr::pivot_wider(names_from =  Feature,
-                       values_from = Area) %>%
-    mutate(gas_station = ifelse(str_detect(Sample_name, "F001"), "Station_1",
-                                ifelse(str_detect(Sample_name, "F002"), "Station_2",
-                                       ifelse(str_detect(Sample_name, "F003"), "Station_3",
-                                              ifelse(str_detect(Sample_name, "F004"), "Station_4",
-                                                     ifelse(str_detect(Sample_name, "F005"), "Station_5",
-                                                            ifelse(str_detect(Sample_name, "F006"), "Station_6",
-                                                                   ifelse(str_detect(Sample_name, "F007"), "Station_7",
-                                                                          ifelse(str_detect(Sample_name, "F008"), "Station_8",
-                                                                                 ifelse(str_detect(Sample_name, "F009"), "Station_9", "Station_10")))))))))) %>%
-    tibble::column_to_rownames(., var="Sample_name") %>% 
-    relocate(Octane_rating, samp_event, gas_station, .after = 1)
+# Investigate data distribution
+hist((shared_comp_rt10.1 %>%
+  filter(Area < 2000000))$Area)
 
-## REMOVING COMPOUND THAT APPEAR IN ONLY 1 SAMPLE ------------
-unique_col <- c()
-for (col in 3:ncol(normalized_df)) {
-  if (sum(!is.na(normalized_df[,col])) == 1) {
-    unique_col <- c(unique_col, col)
-  }
-}
 
-normalized_df <- normalized_df[, -unique_col]
+df_step3 <- shared_comp_rt10.1 %>%
+  # filter(Area < 2000000) %>%
+  dplyr::select(Sample_name,
+                Octane_rating,
+                samp_event,
+                Feature,
+                Area) %>%
+  # since we have multiple different values of the same compound in some samples, we summarize these values by taking the mean of them
+  dplyr::group_by(
+    Sample_name,
+    Octane_rating,
+    samp_event,
+    Feature) %>%
+  dplyr::summarise(across(Area, base::mean)) %>%
+  tidyr::pivot_wider(names_from = Feature,
+                     values_from = Area) %>%
+  mutate(gas_station = ifelse(str_detect(Sample_name, "F001"), "Station_1",
+                              ifelse(str_detect(Sample_name, "F002"), "Station_2",
+                                     ifelse(str_detect(Sample_name, "F003"), "Station_3",
+                                            ifelse(str_detect(Sample_name, "F004"), "Station_4",
+                                                   ifelse(str_detect(Sample_name, "F005"), "Station_5",
+                                                          ifelse(str_detect(Sample_name, "F006"), "Station_6",
+                                                                 ifelse(str_detect(Sample_name, "F007"), "Station_7",
+                                                                        ifelse(str_detect(Sample_name, "F008"), "Station_8",
+                                                                               ifelse(str_detect(Sample_name, "F009"), "Station_9", "Station_10")))))))))) %>%
+  relocate(Octane_rating, samp_event, gas_station, Sample_name, .after = 1)
+```
 
+
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
 ## REMOVE COMPOUNDS THAT HAVE >90% MISSING VALUES ----------------
-col_90 <- c()
-for (col in 3:ncol(normalized_df)) {
-  if (sum(!is.na(normalized_df[,col]))/length(normalized_df[,col]) < 0.1) {
-    col_90 <- c(col_90, col)
+col_90na <- c()
+for (col in 5:ncol(df_step3)) {
+  if (sum(!is.na(df_step3[,col]))/dim(df_step3)[1] < 0.1) {
+    col_90na <- c(col_90na, col)
   }
 }
 
-normalized_df <- normalized_df[, -col_90]
+df_step3 <- df_step3[, -col_90na]
+```
 
-## SELECT TOP 150 COMPOUNDS THAT HAVE HIGHEST CUMULATIVE PEAK AREA ACROSS ALL SAMPLES ---------------
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+## Filter out compounds that consistently appear in high values across majority of samples
+
+
+## SELECT TOP 100 COMPOUNDS THAT HAVE HIGHEST CUMULATIVE PEAK AREA ACROSS ALL SAMPLES ---------------
 # Compute the sum of values of each column
-column_sums <- colSums(normalized_df[,3:ncol(normalized_df)])
+column_sums <- colSums(df_step3[,4:ncol(df_step3)])
 
 # Order the columns based on their sum values
-ordered_columns <- order(column_sums, decreasing = TRUE)
-
-## Select the top 100 columns with the highest sum value ----------------
-top_100_columns <- names(column_sums)[ordered_columns[1:100]]
+# Select the top 100 columns with the highest sum value
+top_100_cum_sum <- names(column_sums)[order(column_sums, decreasing = TRUE)[1:100]]
 
 # Create a new dataframe with only the top 100 columns
-normalized_df <- normalized_df[, c("Octane_rating", "samp_event",top_100_columns)]
+df_step3 <- df_step3[, c("Octane_rating", "samp_event", "gas_station", top_100_cum_sum)]
 
 ## SELECT TOP 150 COMPOUNDS THAT HAVE HIGHEST Variance of ACROSS ALL SAMPLES ------------
 # Compute variance of values for each column
-variances <- apply(normalized_df[,3:ncol(normalized_df)], 2, var)
+variances <- apply(df_step3[,3:ncol(df_step3)], 2, var)
 
 # Sort variances in descending order and get the indices of the top 100 columns
-top_100_indices <- order(variances, decreasing = TRUE)[1:100]
+top_100_var <- order(variances, decreasing = TRUE)[1:100]
 
 # Select the top 100 columns with highest variance values
-top_100_variance <- normalized_df[, c(1, 2, top_100_indices)]
+df_step3 <- df_step3[, c(1, 2, top_100_var)]
 
 ```
 
 ## Option 1: Zero
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-for (r in 1:nrow(normalized_df)) {
-  normalized_df[r, which(base::is.na(normalized_df[r,]))] <- 0
+for (r in 1:nrow(df_step3)) {
+  df_step3[r, which(base::is.na(df_step3[r,]))] <- 0
 }
 ```
 
 ## Option 2: Minimum 
 ```{r , echo=FALSE, warning = FALSE, message=FALSE}
-for (r in 1:nrow(normalized_df)) { 
-  normalized_df[r, which(base::is.na(normalized_df[r,]))] <- min(shared_comp_rt10.1$Area)
+for (r in 1:nrow(df_step3)) { 
+  df_step3[r, which(base::is.na(df_step3[r,]))] <- min(shared_comp_rt10.1$Area)
+} 
+```
+
+## Option 3: LOD 
+LOD = go through each row of the df and replacing missing values multiply the lowest values of each sample by 3
+
+```{r , echo=FALSE, warning = FALSE, message=FALSE}
+for (r in 1:nrow(df_step3[, 3:ncol(df_step3)])) { 
+  df_step3[, 3:ncol(df_step3)][r, which(base::is.na(df_step3[, 3:ncol(df_step3)][r,]))] <- 3*min(df_step3[, 3:ncol(df_step3)][r, which(!base::is.na(df_step3[, 3:ncol(df_step3)][r,]))])
 } 
 
 ```
 
-## Option 3: LOD 
-LOD = Multiply the lowest values of each sample by 3
-
+## Option 4: Randomized values drawn from uniform distribution of the two global minimum values
 ```{r , echo=FALSE, warning = FALSE, message=FALSE}
-for (r in 1:nrow(normalized_df[, 3:ncol(normalized_df)])) { 
-  normalized_df[, 3:ncol(normalized_df)][r, which(base::is.na(normalized_df[, 3:ncol(normalized_df)][r,]))] <- 3*min(normalized_df[, 3:ncol(normalized_df)][r, which(!base::is.na(normalized_df[, 3:ncol(normalized_df)][r,]))])
+for (r in 1:nrow(df_step3)) { 
+  df_step3[r, which(base::is.na(df_step3[r,]))] <- runif(length(which(is.na(df_step3[r,]))),
+                                                         min = sort(as.numeric(unlist(df_step3[, 4:ncol(df_step3)])))[1],
+                                                         max = sort(as.numeric(unlist(df_step3[, 4:ncol(df_step3)])))[2])
 } 
-
 ```
 
 # STEP 4: Data Normalization
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-for (i in 1:length(normalized_df)) {
-  comp_normalized_rt10.1 <- as.data.frame(t(apply(normalized_df[, 4:ncol(normalized_df)],
+for (i in 1:length(df_step3)) {
+  comp_normalized_rt10.1 <- as.data.frame(t(apply(df_step3[, 5:ncol(df_step3)],
                                                   MARGIN = 1, 
                                                   function(row) {row/sum(row, na.rm = TRUE)}))) 
 }
 
 comp_normalized_rt10.1 <- comp_normalized_rt10.1 %>% 
-  mutate(Octane_rating = normalized_df$Octane_rating) %>%
-  mutate(sampling_season = normalized_df$samp_event) %>%
-  mutate(gas_station = normalized_df$gas_station)
+  mutate(Octane_rating = df_step3$Octane_rating) %>%
+  mutate(sampling_season = df_step3$samp_event) %>%
+  mutate(gas_station = df_step3$gas_station) %>%
+  mutate(Sample_name = df_step3$Sample_name)
 ```
 
 # Export file for ML
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-writexl::write_xlsx(comp_normalized_rt10.1, path = paste0(getwd(), "/arson.xlsx"))
+writexl::write_xlsx(comp_normalized_rt10.1, path = paste0(getwd(), "/python/arson.xlsx"))
 ```
 
 
@@ -388,10 +402,15 @@ Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’
 Octane_rating  3 3.250e-27 1.085e-27   0.482  0.696
 Residuals     67 1.508e-25 2.250e-27
 
+(Update 22nd April 2024:) There is no difference between gas stations
+            Df    Sum Sq   Mean Sq F value Pr(>F)
+gas_station  9 4.311e-30 4.790e-31   0.926  0.509
+Residuals   61 3.155e-29 5.171e-31 
+
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 summary(aov(as.formula(paste(paste(setdiff(names(comp_normalized_rt10.1 %>%
-                                             select(-"Octane_rating")), "sampling_season"), collapse = "+"), " ~ sampling_season")), data = comp_normalized_rt10.1 %>%
-                                             select(-"Octane_rating")))
+                                             select(-c("Octane_rating", "sampling_season"))), "gas_station"), collapse = "+"), " ~ gas_station")), data = comp_normalized_rt10.1 %>%
+                                             select(-c("Octane_rating", "sampling_season"))))
 ```
 
 ## PCA
@@ -403,14 +422,13 @@ summary(aov(as.formula(paste(paste(setdiff(names(comp_normalized_rt10.1 %>%
 
 !! Tried top 150 compounds with highest cumulative peak area => still no clustering on both sampling seasons and octane rating.
 
-!! Tried top 150 compounds with highst variance 
+!! Tried top 150 compounds with highest variance 
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 
 res.pca <- FactoMineR::PCA(
-  comp_normalized_rt10.1 %>% select(-c("sampling_season", "Octane_rating", "gas_station")),
-  # clr_transformed_pca,
-  scale.unit = FALSE,
+  subset(df_step3, select = 5:ncol(df_step3)), # comp_normalized_rt10.1 %>% select(-c("sampling_season", "Octane_rating", "gas_station", "Sample_name")),
+  scale.unit = TRUE,
   graph = FALSE)
 
 # Scree plot
@@ -423,7 +441,7 @@ factoextra::fviz_pca_biplot(res.pca,
                             invisible = "var", 
                             repel = TRUE,
                             labelsize = 10, 
-                            habillage = factor(comp_normalized_rt10.1$gas_station),
+                            habillage = factor(df_step3$samp_event),
                             addEllipses = TRUE,
                             ellipse.level = 0.95,
                             ggtheme = ggplot2::theme_minimal(base_size = 20),
@@ -436,6 +454,21 @@ factoextra::fviz_pca_biplot(res.pca,
   theme(legend.position = 'bottom') + coord_equal()
 
 ```
+## HCA
+```{r, echo=FALSE, warning = FALSE, message=FALSE}
+hc_df <- comp_normalized_rt10.1 %>%
+  select(-c(sampling_season, Octane_rating, gas_station, Sample_name))
+
+
+## Dissimilarity Indices Calculated by vegan::vegdist()
+hca_samp <- stats::hclust(vegan::vegdist(hc_df,
+                                         method = "robust.aitchison")) # Since our data is continous -> canberra // manhattan // aitchison // robust.aitchison
+
+plot(hca_samp,
+     labels = comp_normalized_rt10.1$Sample_name,
+     hang = -1,
+     main = "")
+```    
 
 ## t-SNE
 ```{r, echo=FALSE, warning = FALSE, message=FALSE}
@@ -448,7 +481,7 @@ library(plotly)
 
 dat <- comp_normalized_rt10.1
 
-features <- subset(dat, select = -c(sampling_season, Octane_rating))
+features <- subset(dat, select = -c(sampling_season, Octane_rating, gas_station, Sample_name))
 
 tsne <- tsne(features,
              initial_dims = 3, 
@@ -457,10 +490,10 @@ tsne <- tsne(features,
              max_iter = 5000
              )
 
-pdb <- cbind(data.frame(tsne), comp_normalized_rt10.1$Octane_rating)
+pdb <- cbind(data.frame(tsne), comp_normalized_rt10.1$gas_station)
 options(warn = -1)
 tsne_plot <- plot_ly(data = pdb ,x =  ~X1, y = ~X2, z = ~X3, 
-               color = ~comp_normalized_rt10.1$Octane_rating) %>% 
+               color = ~comp_normalized_rt10.1$gas_station) %>% 
   add_markers(size = 8) %>%
   layout( 
     xaxis = list(
@@ -483,12 +516,9 @@ library(umap)
 
 dat <- comp_normalized_rt10.1 
 
-features <- subset(dat, select = -c(sampling_season, Octane_rating
-                                    ))
+features <- subset(dat, select = -c(sampling_season, Octane_rating, gas_station, Sample_name))
 
-umap <- umap(features, n_components = 3,
-             method = 'naive', metric= "manhattan",
-             alpha = 0.0001, gamma = 0.0001)
+umap <- umap(features, n_components = 3)
 
 layout <- cbind(data.frame(umap[["layout"]]), comp_normalized_rt10.1$sampling_season)
 umap_plot <- plot_ly(layout, x = ~X1, y = ~X2, z = ~X3, 
@@ -508,19 +538,16 @@ Before running multiple Wilcoxon tests, it is recommended to examine whether cri
 First, equal variance and normally distributed between two populations, here are Gas and Diesel using histogram, Q-Q plots. Here, both Gas and Diesel populations are NOT normally distributed.
 
 ```{r, echo = TRUE, message = FALSE, warning = FALSE}
-GasData <- as.vector(t(cat_5[,c(1:21)])) # 100149 data points
-DieselData <- as.vector(t(cat_5[,c(22:25)])) # 19076 data point
-
 # Histogram
-hist(GasData, col='steelblue', main='Gas')
-hist(DieselData, col='steelblue', main='Diesel')
+hist(, col='steelblue', main='')
+hist(, col='steelblue', main='')
 
 # Q-Q plots aka. Normal Probability plots
-stats::qqnorm(GasData, main='Gas')
-stats::qqline(GasData)
+stats::qqnorm(, main='')
+stats::qqline()
 
-stats::qqnorm(DieselData, main='Diesel')
-stats::qqline(DieselData)
+stats::qqnorm(, main='')
+stats::qqline()
 ```
 
 Then, equality of variance between Gas and Diesel populations can be examined using Levene's test and Fligner-Killeen test for non-normally distributed data. Here, for both tests, p values are \< 0.05, and thus, there is significant difference in variances between Gas and Diesel populations.
@@ -541,31 +568,40 @@ Here, multiple Wilcoxon tests followed by p-value correction for multiple testin
 
 ### Between gas station
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
+sig_comp <- list()
+j <- 1
 
 df <- data.frame(Feature=character(), comparison_pair=character(), pval_wilcox_test=integer())
 
-comp_normalized_rt10.1_filtered <- comp_normalized_rt10.1[!(comp_normalized_rt10.1$gas_station %in% names(table(comp_normalized_rt10.1$gas_station)[table(comp_normalized_rt10.1$gas_station) < 3])),] %>% 
-  select(-c("Octane_rating", "sampling_season")) %>%
-  relocate(gas_station, .before = 1)
+df_filtered <- comp_normalized_rt10.1[!(comp_normalized_rt10.1$Octane_rating %in% names(table(comp_normalized_rt10.1$Octane_rating)[table(comp_normalized_rt10.1$Octane_rating) < 3])),] %>% 
+  select(-c("sampling_season", "gas_station")) %>%
+  relocate(Octane_rating, .before = 1)
 
-for (c in 2:ncol(comp_normalized_rt10.1_filtered)) {      
+for (c in 2:ncol(df_filtered)) {      
   # looping through the combinations of product categories 
-  for (col in 1:ncol(utils::combn(unique(comp_normalized_rt10.1_filtered$gas_station), 2))) {
+  for (col in 1:ncol(utils::combn(unique(df_filtered$Octane_rating), 2))) {
     # extract the combinations of product category pairs
-    p_1 <- utils::combn(unique(comp_normalized_rt10.1_filtered$gas_station), 2)[1,col]
-    p_2 <- utils::combn(unique(comp_normalized_rt10.1_filtered$gas_station), 2)[2,col]
+    p_1 <- utils::combn(unique(df_filtered$Octane_rating), 2)[1,col]
+    p_2 <- utils::combn(unique(df_filtered$Octane_rating), 2)[2,col]
     
-    # calculating the p-value between each product category pair 
-    pval_wilcox_test <- wilcox.test(as.numeric(unlist(tempdf_filtered[which(comp_normalized_rt10.1_filtered$gas_station == p_1), c])), 
-                                    as.numeric(unlist(tempdf_filtered[which(comp_normalized_rt10.1_filtered$gas_station == p_2), c])))$p.value
+    # calculating the p-value between each gas station pair 
+    pval_wilcox_test <- wilcox.test(as.numeric(unlist(df_filtered[which(df_filtered$Octane_rating == p_1), 2])), # number "2" here is because we slice in the 2nd column of the subset dataframe
+                                    as.numeric(unlist(df_filtered[which(df_filtered$Octane_rating == p_2), 2])))$p.value
     # assigning row information
-    df[nrow(df) + 1,] <- c(colnames(dat)[c], 
+    df[nrow(df) + 1,] <- c(colnames(df_filtered)[c], 
                            paste0(p_1, " & ", p_2), 
                            pval_wilcox_test)
   }
 }
+
+pvaluecorrect <- c("holm", "hochberg", "hommel", "BH", "BY")
+for (m in pvaluecorrect) {
+  df$adjusted_pvalue <- stats::p.adjust(df$pval_wilcox_test, method = m)
+  print(df %>%
+          filter(., adjusted_pvalue < 0.05) %>%
+          arrange(adjusted_pvalue))
+  
+  sig_comp[[j]] <- df
+  j <- j + 1
+}
 ```
-
-### Between sampling seasons
-
-### Between octane rating
