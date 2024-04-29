@@ -127,11 +127,19 @@ dfs <- excel_sheets(file_path) %>%
 df_step1.1 <- bind_rows(dfs) %>%
   select(-c("MF", "RMF", "Area %")) %>%
   mutate(Octane_rating = ifelse(str_detect(Sample_name, "A"), "Gas_87", 
-                              ifelse(str_detect(Sample_name, "B"), "Gas_89",
-                                     ifelse(str_detect(Sample_name, "C"), "Gas_91", "Gas_94")))) %>%
-  mutate(samp_event = ifelse(str_detect(Sample_name, "b"), "blue",
-                             ifelse(str_detect(Sample_name, "p"), "purple", "orange")))
-
+                                ifelse(str_detect(Sample_name, "B"), "Gas_89",
+                                       ifelse(str_detect(Sample_name, "C"), "Gas_91", "Gas_94")))) %>%
+  mutate(sampling_season = ifelse(str_detect(Sample_name, "b"), "blue",
+                                  ifelse(str_detect(Sample_name, "p"), "purple", "orange"))) %>%
+  mutate(gas_station = ifelse(str_detect(Sample_name, "F001"), "Station_1",
+                              ifelse(str_detect(Sample_name, "F002"), "Station_2",
+                                     ifelse(str_detect(Sample_name, "F003"), "Station_3",
+                                            ifelse(str_detect(Sample_name, "F004"), "Station_4",
+                                                   ifelse(str_detect(Sample_name, "F005"), "Station_5",
+                                                          ifelse(str_detect(Sample_name, "F006"), "Station_6",
+                                                                 ifelse(str_detect(Sample_name, "F007"), "Station_7",
+                                                                        ifelse(str_detect(Sample_name, "F008"), "Station_8",
+                                                                               ifelse(str_detect(Sample_name, "F009"), "Station_9", "Station_10")))))))))) 
 # modify columns names
 colnames(df_step1.1)[2] <- "RT1"
 colnames(df_step1.1)[3] <- "RT2"
@@ -143,11 +151,12 @@ colnames(df_step1.1)[9] <- "Ion2"
 # STEP 1.2: Filtering out column bleed, solvent and BTEX and minimum area observations
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 filter_list <- c("^Carbon disulfide$", 
-                "Cyclotrisiloxane..hexamethyl",
-                "^Benzene$",
-                "^Toluene$",
-                "^Ethylbenzene$",
-                "Xylene")
+                "Cyclotrisiloxane..hexamethyl"
+                # "^Benzene$",
+                # "^Toluene$",
+                # "^Ethylbenzene$",
+                # "Xylene"
+                )
 
 df_step1.2 <- copy(df_step1.1)
 for (filter_comp in filter_list) {
@@ -171,20 +180,101 @@ hist(as.numeric(bm_df$RT2),
      xlab = "RT2", ylab ="", cex.axis = 2, cex.lab = 2, cex.main = 2,
      main = "Toluene")
 ```
+# QUALITY CONTROL A OF STEP 1.2B: Plot Percentage coverage after removal of limit observation
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+plot_a <- list()
+i <- 1
+for (name in unique(df_step1.2$Sample_name)[50:70]) {
+  coverage <- c()
+  for (threshold in c(seq(from = 0, to = 250000, by = 50000))) {
+    temp <- df_step1.2 %>%
+      filter(Sample_name %in% name)
+    df_filter_area <- temp %>%
+      filter(Area > threshold)
+    coverage <- c(coverage, sum(df_filter_area$Area)*100/sum(temp$Area))
+  }
+  df <- data.frame(thres = seq(from = 0, to = 250000, by = 50000), cover = coverage)
+  plot_a[[i]] <- ggplot(data = df,
+                      aes(x = thres, y = cover)) +
+    geom_col() +
+    theme(text = element_text(size = 10)) +
+    geom_text(aes(label = round(cover, digits = 3)), color = "green", angle = 90, hjust = 1, size = 5) +
+    scale_x_continuous(breaks = seq(from = 0, to = 250000, by = 50000),
+                       # remove space between plotted data and xy-axes
+                       expand = c(0,0)) +
+    scale_y_continuous(breaks = seq(from = 0, to = 100, by = 25), 
+                       # remove space between plotted data and xy-axes
+                       expand = c(0,0)) +
+    ggtitle(name) +
+    labs(x = NULL, y = NULL) 
+  i <- i + 1
+}
+
+y <- textGrob("Percentage coverage of remaining peaks after removal", rot = 90, gp = gpar(fontsize = 20))
+x <- textGrob("Threshold of removal for limit observations", gp = gpar(fontsize = 20))
+
+grid.arrange(grobs = plot_a, ncol = 5, 
+             left = y,
+             bottom = x)
+```
+
+
+# QUALITY CONTROL B OF STEP 1.2B: Plot number of peak remains after removal of limit observation
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+plot_b <- list()
+i <- 1
+for (name in unique(df_step1.2$Sample_name)[50:70]) {
+  peak_remain <- c()
+  for (threshold in c(seq(from = 0, to = 250000, by = 50000))) {
+    temp <- df_step1.2 %>%
+      filter(Sample_name %in% name)
+    df_filter_area <- temp %>%
+      filter(Area > threshold)
+    peak_remain <- c(peak_remain, dim(df_filter_area)[1])
+  }
+  df <- data.frame(thres = seq(from = 0, to = 250000, by = 50000), remain = peak_remain)
+  plot_b[[i]] <- ggplot(data = df,
+                      aes(x = thres, y = remain)) +
+    geom_col() +
+    geom_text(aes(label = remain), color = "green", vjust = 1.2, size = 5) +
+    scale_x_continuous(breaks = seq(from = 0, to = 250000, by = 50000), 
+                       # remove space between plotted data and xy-axes
+                       expand = c(0,0)) +
+    ggtitle(name) +
+    theme(axis.text.x = element_text(size = 20),
+          axis.text.y = element_text(size = 20)) +
+    labs(x = NULL, y = NULL) +
+    theme_classic()
+  i <- i + 1
+}
+
+y <- textGrob("Number of peak remains after removal of limit observation", rot = 90, gp = gpar(fontsize = 15))
+x <- textGrob("Threshold of removal for limit observations", gp = gpar(fontsize = 15))
+
+grid.arrange(grobs = plot_b, ncol = 5, 
+             left = y,
+             bottom = x)
+```
+
+
 
 # STEP 2: Grouping compounds based on RT1, RT2, Ion1, Ion2
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
 
-rt10.1 <- grouping_comp_ver1(df_step1.2 %>% arrange(RT1, RT2),
-                             rt1thres = 0.2,
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+alignment <- grouping_comp_ver1(df_step1.2 %>%
+                               filter(Area > 300000) %>% 
+                               arrange(RT1, RT2),
+                             rt1thres = 0.3,
                              rt2thres = 0.15,
                              ion1thres = 0.05, # Ion 1 and 2 indicates molecular structure (2 most prevalent mass-to-charge)
                              ion2thres = 0.05)
 
 # STEP 2: Identify shared and unique compound groups across samples ================================================================================
-filter_rt10.1 <- comp_filter(rt10.1)
+filter_alignment <- comp_filter(alignment)
 
-shared_comp_rt10.1 <- rt10.1[filter_rt10.1[[1]],]
+shared_comp_alignment <- alignment[filter_alignment[[1]],]
 ```
 
 ## QUALITY CONTROL 1: Confirming ASTM at each step of Data processing
@@ -199,11 +289,11 @@ count_ASTM <- function(data, ASTM_list, which_step) {
     rt2 <- ASTM_list[r,]$RT2
     ion1 <- ASTM_list[r,]$Ion1
     ion2 <- ASTM_list[r,]$Ion2
-    idx <- which(data$RT1 <= (rt1 + 0.1) & data$RT1 >= (rt1 - 0.1) & 
+    idx <- which(data$RT1 <= (rt1 + 0.3) & data$RT1 >= (rt1 - 0.3) & 
                    data$RT2 <= (rt2 + 0.15) & data$RT2 >= (rt2 - 0.15) & 
                    # Tolerance ion window of 0.5 for ASTM compounds
-                   data$Ion1 <= (ion1 + 0.5) & data$Ion1 >= (ion1 - 0.5) & 
-                   data$Ion2 <= (ion2 + 0.5) & data$Ion2 >= (ion2 - 0.5))
+                   data$Ion1 <= (ion1 + 0.05) & data$Ion1 >= (ion1 - 0.05) & 
+                   data$Ion2 <= (ion2 + 0.05) & data$Ion2 >= (ion2 - 0.05))
     
     if (length(idx) > 0) {
       count <- count + 1
@@ -219,44 +309,81 @@ count_ASTM(bind_rows(bm_df), ASTM_list, which_step = "STEP 1.2")
 count_ASTM(shared_comp_rt10.1, ASTM_list, which_step = "STEP 2")
 ```
 
+
 # STEP 3: Missing value imputation
 (Update 21 April 2024:) After remove compounds appear in only one sample and compounds that have >90% Missing values -> plot histogram of distribution -> most of compounds are < 2e+06 => try filter all peaks that is >= 2e+06
 
+## Investigate data distribution for eremoval of compounds with high mean and low variance
+
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-# Investigate data distribution
-hist((shared_comp_rt10.1 %>%
-  filter(Area < 2000000))$Area)
+# Investigate data distribution for removal of compounds with high mean and low variance
+hist((shared_comp_alignment %>%
+  filter(Area < 10000000))$Area)
 
 
-df_step3 <- shared_comp_rt10.1 %>%
-  # filter(Area < 2000000) %>%
-  dplyr::select(Sample_name,
-                Octane_rating,
-                samp_event,
-                Feature,
-                Area) %>%
+summary_table <- shared_comp_alignment %>%
+  group_by(Feature) %>%
+  summarise(
+    mean_RT1 = mean(RT1),
+    mean_RT2 = mean(RT2),
+    mean_Area = mean(Area),
+    sd_RT1 = sd(RT1),
+    sd_RT2 = sd(RT2),
+    sd_Area = sd(Area),
+    Ion1 = mean(Ion1),
+    Ion2 = mean(Ion2)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    compound_name = Feature  # Create a new column for compound_name
+  ) %>%
+  select(compound_name, mean_Area, sd_Area, mean_RT1, sd_RT1, mean_RT2, sd_RT2, Ion1, Ion2)  # Select columns for the summary table
+
+# Rename columns
+colnames(summary_table) <- c("compound_name", "mean", "standard_deviation", "meanRT1", "sdRT1", "meanRT2", "sdRT2", "Ion1", "Ion2")
+
+# Print the summary table
+View(summary_table %>% arrange(standard_deviation, desc(mean)))
+
+plotdf <- (summary_table %>% arrange(standard_deviation, desc(mean)))[1:100,]
+ggplot(data = plotdf, aes(x=compound_name, y = mean)) +
+  geom_bar(stat = 'identity', width = 0.5) +
+  geom_errorbar(aes(ymin = mean - standard_deviation,
+                    ymax = mean + standard_deviation, colour = "red")) +
+  ggtitle("Rank 1:100") +
+  theme_classic(base_size = 15) +
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+df_step3 <- shared_comp_alignment %>%
+  # remove top x compounds with high Area and low variance across samples
+  filter(Feature %notin% (summary_table %>% arrange(standard_deviation, desc(mean)))[1:100,]$compound_name) %>%
+  dplyr::select(
+    Sample_name,
+    Octane_rating,
+    sampling_season,
+    gas_station,
+    Feature,
+    Area) %>%
   # since we have multiple different values of the same compound in some samples, we summarize these values by taking the mean of them
   dplyr::group_by(
     Sample_name,
     Octane_rating,
-    samp_event,
+    sampling_season,
+    gas_station,
     Feature) %>%
   dplyr::summarise(across(Area, base::mean)) %>%
   tidyr::pivot_wider(names_from = Feature,
                      values_from = Area) %>%
-  mutate(gas_station = ifelse(str_detect(Sample_name, "F001"), "Station_1",
-                              ifelse(str_detect(Sample_name, "F002"), "Station_2",
-                                     ifelse(str_detect(Sample_name, "F003"), "Station_3",
-                                            ifelse(str_detect(Sample_name, "F004"), "Station_4",
-                                                   ifelse(str_detect(Sample_name, "F005"), "Station_5",
-                                                          ifelse(str_detect(Sample_name, "F006"), "Station_6",
-                                                                 ifelse(str_detect(Sample_name, "F007"), "Station_7",
-                                                                        ifelse(str_detect(Sample_name, "F008"), "Station_8",
-                                                                               ifelse(str_detect(Sample_name, "F009"), "Station_9", "Station_10")))))))))) %>%
-  relocate(Octane_rating, samp_event, gas_station, Sample_name, .after = 1)
+  relocate(
+    Octane_rating,
+    sampling_season,
+    gas_station,
+    Sample_name,
+    .after = 1)
 ```
-
-
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 ## REMOVE COMPOUNDS THAT HAVE >90% MISSING VALUES ----------------
@@ -267,16 +394,15 @@ for (col in 5:ncol(df_step3)) {
   }
 }
 
-df_step3 <- df_step3[, -col_90na]
+if (!is.null(col_90na)) {
+  df_step3 <- df_step3[, -col_90na]
+}
 ```
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-## Filter out compounds that consistently appear in high values across majority of samples
-
-
 ## SELECT TOP 100 COMPOUNDS THAT HAVE HIGHEST CUMULATIVE PEAK AREA ACROSS ALL SAMPLES ---------------
 # Compute the sum of values of each column
-column_sums <- colSums(df_step3[,4:ncol(df_step3)])
+column_sums <- colMeans(df_step3[,4:ncol(df_step3)])
 
 # Order the columns based on their sum values
 # Select the top 100 columns with the highest sum value
@@ -307,7 +433,7 @@ for (r in 1:nrow(df_step3)) {
 ## Option 2: Minimum 
 ```{r , echo=FALSE, warning = FALSE, message=FALSE}
 for (r in 1:nrow(df_step3)) { 
-  df_step3[r, which(base::is.na(df_step3[r,]))] <- min(shared_comp_rt10.1$Area)
+  df_step3[r, which(base::is.na(df_step3[r,]))] <- min(shared_comp_alignment$Area)
 } 
 ```
 
@@ -315,8 +441,8 @@ for (r in 1:nrow(df_step3)) {
 LOD = go through each row of the df and replacing missing values multiply the lowest values of each sample by 3
 
 ```{r , echo=FALSE, warning = FALSE, message=FALSE}
-for (r in 1:nrow(df_step3[, 3:ncol(df_step3)])) { 
-  df_step3[, 3:ncol(df_step3)][r, which(base::is.na(df_step3[, 3:ncol(df_step3)][r,]))] <- 3*min(df_step3[, 3:ncol(df_step3)][r, which(!base::is.na(df_step3[, 3:ncol(df_step3)][r,]))])
+for (r in 1:nrow(df_step3[, 5:ncol(df_step3)])) { 
+  df_step3[r, 5:ncol(df_step3)][,which(base::is.na(df_step3[r, 5:ncol(df_step3)]))] <- 3*min( df_step3[r, 5:ncol(df_step3)][,which(!base::is.na(df_step3[r, 5:ncol(df_step3)]))])
 } 
 
 ```
@@ -324,23 +450,35 @@ for (r in 1:nrow(df_step3[, 3:ncol(df_step3)])) {
 ## Option 4: Randomized values drawn from uniform distribution of the two global minimum values
 ```{r , echo=FALSE, warning = FALSE, message=FALSE}
 for (r in 1:nrow(df_step3)) { 
-  df_step3[r, which(base::is.na(df_step3[r,]))] <- runif(length(which(is.na(df_step3[r,]))),
-                                                         min = sort(as.numeric(unlist(df_step3[, 4:ncol(df_step3)])))[1],
-                                                         max = sort(as.numeric(unlist(df_step3[, 4:ncol(df_step3)])))[2])
+  df_step3[r, which(base::is.na(df_step3[r,]))] <- as.list(runif(length(which(is.na(df_step3[r,]))),
+                                                                 min = sort(shared_comp_alignment$Area)[1],
+                                                                 max = sort(shared_comp_alignment$Area)[2]))
 } 
 ```
 
 # STEP 4: Data Normalization
+
+### Percentage-based normalization
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-for (i in 1:length(df_step3)) {
-  comp_normalized_rt10.1 <- as.data.frame(t(apply(df_step3[, 5:ncol(df_step3)],
-                                                  MARGIN = 1, 
-                                                  function(row) {row/sum(row, na.rm = TRUE)}))) 
-}
+comp_normalized_rt10.1 <- as.data.frame(t(apply(df_step3[, 2:ncol(df_step3)],
+                                                MARGIN = 1, 
+                                                function(row) {row/sum(row, na.rm = TRUE)}))) 
+
 
 comp_normalized_rt10.1 <- comp_normalized_rt10.1 %>% 
   mutate(Octane_rating = df_step3$Octane_rating) %>%
-  mutate(sampling_season = df_step3$samp_event) %>%
+  mutate(sampling_season = df_step3$sampling_season) %>%
+  mutate(gas_station = df_step3$gas_station)
+  mutate(Sample_name = df_step3$Sample_name)
+```
+
+### Log normalization
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+log_normalized_df <- as.data.frame(t(apply(df_step3[, 5:ncol(df_step3)], 1, function(x) log(x))))
+
+comp_normalized_rt10.1 <- log_normalized_df %>% 
+  mutate(Octane_rating = df_step3$Octane_rating) %>%
+  mutate(sampling_season = df_step3$sampling_season) %>%
   mutate(gas_station = df_step3$gas_station) %>%
   mutate(Sample_name = df_step3$Sample_name)
 ```
@@ -424,10 +562,22 @@ summary(aov(as.formula(paste(paste(setdiff(names(comp_normalized_rt10.1 %>%
 
 !! Tried top 150 compounds with highest variance 
 
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
+(Update 29th April:) 
+**DATA COMPRESSION OR NOT??**
+If I **compress all samples into a grouping variables**, such as Octane_rating or sampling_season, I can clearly see the differentiation between these grouping variables. 
 
+**For gas station, ** all 3 imputation techniques all resulted in low Dim1 and Dim2. However, with Zero and Global Min, there seems to be a grouping of gas station no. 2,8,3 (group 1); no. 1, 5 (group 2), no. 10, 4, 9, 7, 6 (group 3).
+
+***If I keep the samples separated*** , then I tried log normalization with 3 imputation techniques ==> Zero imputation will resulted in -Inf after Log-normalization so we can only do Global min and LOD. However, both global min and LOD does nto result in any clear grouping/clustering between "sampling_season", "Octane_rating", "gas_station".
+
+**LOG NORMALIZATION VERSUS. PERCENTAGE-BASED NORMALIZATION**
+I also tried remove the top 100 compounds that have really high mean and low variance across sample and perform zero//global min// LOD imputation on them and then tried Log-normalization ==> still no clustering between gas station!!
+
+Also, I tried to run PCA with un-normalized data (after imputation) with 3 imputation methods but still no clustering of gas stations across all 3 imputation methods.
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
 res.pca <- FactoMineR::PCA(
-  subset(df_step3, select = 5:ncol(df_step3)), # comp_normalized_rt10.1 %>% select(-c("sampling_season", "Octane_rating", "gas_station", "Sample_name")),
+  df_step3[, 5:ncol(df_step3)],
   scale.unit = TRUE,
   graph = FALSE)
 
@@ -441,7 +591,7 @@ factoextra::fviz_pca_biplot(res.pca,
                             invisible = "var", 
                             repel = TRUE,
                             labelsize = 10, 
-                            habillage = factor(df_step3$samp_event),
+                            habillage = factor(df_step3$gas_station), # "sampling_season", "Octane_rating", "gas_station", "Sample_name"
                             addEllipses = TRUE,
                             ellipse.level = 0.95,
                             ggtheme = ggplot2::theme_minimal(base_size = 20),
@@ -452,17 +602,15 @@ factoextra::fviz_pca_biplot(res.pca,
   #                                color = Groups),
   #                            label.buffer = unit(40, 'mm')) +
   theme(legend.position = 'bottom') + coord_equal()
-
 ```
+
 ## HCA
 ```{r, echo=FALSE, warning = FALSE, message=FALSE}
-hc_df <- comp_normalized_rt10.1 %>%
-  select(-c(sampling_season, Octane_rating, gas_station, Sample_name))
-
+hc_df <- comp_normalized_rt10.1 %>% select(-c("Octane_rating", "sampling_season", "gas_station","Sample_name"))
 
 ## Dissimilarity Indices Calculated by vegan::vegdist()
 hca_samp <- stats::hclust(vegan::vegdist(hc_df,
-                                         method = "robust.aitchison")) # Since our data is continous -> canberra // manhattan // aitchison // robust.aitchison
+                                         method = "robust.aitchison")) # Since our data is continous -> canberra // manhattan // robust.aitchison
 
 plot(hca_samp,
      labels = comp_normalized_rt10.1$Sample_name,
@@ -479,9 +627,7 @@ plot(hca_samp,
 library(tsne)
 library(plotly)
 
-dat <- comp_normalized_rt10.1
-
-features <- subset(dat, select = -c(sampling_season, Octane_rating, gas_station, Sample_name))
+features <- subset(df_step3, select = 5:ncol(df_step3))
 
 tsne <- tsne(features,
              initial_dims = 3, 
@@ -490,10 +636,10 @@ tsne <- tsne(features,
              max_iter = 5000
              )
 
-pdb <- cbind(data.frame(tsne), comp_normalized_rt10.1$gas_station)
+pdb <- cbind(data.frame(tsne), df_step3$samp_event)
 options(warn = -1)
 tsne_plot <- plot_ly(data = pdb ,x =  ~X1, y = ~X2, z = ~X3, 
-               color = ~comp_normalized_rt10.1$gas_station) %>% 
+               color = ~df_step3$samp_event) %>% 
   add_markers(size = 8) %>%
   layout( 
     xaxis = list(
@@ -514,15 +660,13 @@ tsne_plot
 ```{r, echo=FALSE, warning = FALSE, message=FALSE}
 library(umap)
 
-dat <- comp_normalized_rt10.1 
-
-features <- subset(dat, select = -c(sampling_season, Octane_rating, gas_station, Sample_name))
+features <- comp_normalized_rt10.1 %>% select(-c("Octane_rating", "sampling_season", "gas_station","Sample_name"))
 
 umap <- umap(features, n_components = 3)
 
-layout <- cbind(data.frame(umap[["layout"]]), comp_normalized_rt10.1$sampling_season)
+layout <- cbind(data.frame(umap[["layout"]]), comp_normalized_rt10.1$gas_station)
 umap_plot <- plot_ly(layout, x = ~X1, y = ~X2, z = ~X3, 
-                color = ~comp_normalized_rt10.1$sampling_season) %>% 
+                color = ~comp_normalized_rt10.1$gas_station) %>% 
   add_markers() %>%
   layout(scene = list(xaxis = list(title = 'x-axis'), 
                                    yaxis = list(title = 'y-axis'), 
