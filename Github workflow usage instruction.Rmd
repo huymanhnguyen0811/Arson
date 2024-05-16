@@ -323,7 +323,7 @@ data <- subset.data.frame(alignment,
 
 colnames(data)[1] <- "Compound"
 
-# Visual estimation of how much adjustment needed prior to the adjustment
+# Visual confirmation of appropriate RT windows by checking overlapping of RT1 and RT2 of aligned compounds and ASTMs 
 plotly::ggplotly(ggplot(data = data, aes(x = RT1, y = RT2, label = Compound)) +
                    geom_point(pch = 1, size = 0.5) +
                    geom_point(data = ASTM_subset, pch = 4, size = 1.5,
