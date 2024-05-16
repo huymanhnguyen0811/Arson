@@ -48,6 +48,8 @@ library(compositions)
 library(ggforce)
 library(latticeExtra)
 library(cluster)
+library(umap)
+library(plotly)
 
 # Functions -------------------------------------------------------------------------------------------------------
 # Notin function
@@ -117,7 +119,7 @@ comp_filter <- function(data) {
 
 # STEP 1.1: Data import
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-ASTM_list <- read_xlsx("ASTM Compound List.xlsx")
+ASTM_list <- read_xlsx("ILR Compound List 05-15-2024.xlsx")
 file_path <- "Gasolines_BOP_110424.xlsx"
 
 dfs <- excel_sheets(file_path) %>%
@@ -125,7 +127,7 @@ dfs <- excel_sheets(file_path) %>%
   map(~ read_excel(file_path, sheet = .x) %>% mutate(Sample_name = .x))
 
 df_step1.1 <- bind_rows(dfs) %>%
-  select(-c("MF", "RMF", "Area %")) %>%
+  select(-c("RMF", "Area %")) %>%
   mutate(Octane_rating = ifelse(str_detect(Sample_name, "A"), "Gas_87", 
                                 ifelse(str_detect(Sample_name, "B"), "Gas_89",
                                        ifelse(str_detect(Sample_name, "C"), "Gas_91", "Gas_94")))) %>%
@@ -140,15 +142,15 @@ df_step1.1 <- bind_rows(dfs) %>%
                                                                  ifelse(str_detect(Sample_name, "F007"), "Station_7",
                                                                         ifelse(str_detect(Sample_name, "F008"), "Station_8",
                                                                                ifelse(str_detect(Sample_name, "F009"), "Station_9", "Station_10")))))))))) 
+
 # modify columns names
-colnames(df_step1.1)[2] <- "RT1"
-colnames(df_step1.1)[3] <- "RT2"
-colnames(df_step1.1)[6] <- "Ion3"
-colnames(df_step1.1)[8] <- "Ion1"
-colnames(df_step1.1)[9] <- "Ion2"
+colnames(df_step1.1)[colnames(df_step1.1) == '<sup>1</sup>t<sub>R</sub>'] <- 'RT1'
+colnames(df_step1.1)[colnames(df_step1.1) == '<sup>2</sup>t<sub>R</sub>'] <- 'RT2'
+colnames(df_step1.1)[colnames(df_step1.1) == 'Major'] <- 'Ion1'
+colnames(df_step1.1)[colnames(df_step1.1) == 'Qual'] <- 'Ion2'
 ```
 
-# STEP 1.2: Filtering out column bleed, solvent and BTEX and minimum area observations
+# STEP 1.2: Filtering out column bleed, solvent and BTEX and MF = 0
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 filter_list <- c("^Carbon disulfide$", 
                 "Cyclotrisiloxane..hexamethyl"
@@ -158,13 +160,17 @@ filter_list <- c("^Carbon disulfide$",
                 # "Xylene"
                 )
 
-df_step1.2 <- copy(df_step1.1)
+df_step1.2 <- copy(df_step1.1) %>%
+  filter(MF > 0)
+
 for (filter_comp in filter_list) {
   df_step1.2 <- df_step1.2 %>%
       filter(!grepl(filter_comp, Compound))
 }
+```
 
-
+### Plot benchmark distribution for aligning compounds later
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
 bm_df <- df_step1.1 %>% 
   filter(grepl("Toluene-D8", Compound)) %>%
   filter(RT2 >= 3 & RT2 <= 5)
@@ -180,6 +186,7 @@ hist(as.numeric(bm_df$RT2),
      xlab = "RT2", ylab ="", cex.axis = 2, cex.lab = 2, cex.main = 2,
      main = "Toluene")
 ```
+
 # QUALITY CONTROL A OF STEP 1.2B: Plot Percentage coverage after removal of limit observation
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
@@ -260,7 +267,7 @@ grid.arrange(grobs = plot_b, ncol = 5,
 
 
 
-# STEP 2: Grouping compounds based on RT1, RT2, Ion1, Ion2
+# STEP 2: Grouping compounds based on RT1, RT2, Ion1, Ion2 and Filt
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 alignment <- grouping_comp_ver1(df_step1.2 %>%
@@ -270,16 +277,11 @@ alignment <- grouping_comp_ver1(df_step1.2 %>%
                              rt2thres = 0.15,
                              ion1thres = 0.05, # Ion 1 and 2 indicates molecular structure (2 most prevalent mass-to-charge)
                              ion2thres = 0.05)
-
-# STEP 2: Identify shared and unique compound groups across samples ================================================================================
-filter_alignment <- comp_filter(alignment)
-
-shared_comp_alignment <- alignment[filter_alignment[[1]],]
 ```
 
-## QUALITY CONTROL 1: Confirming ASTM at each step of Data processing
+## QUALITY CONTROL: Confirming ASTM at each step of Data processing
 
-(UPDATE 22 April 2024:) We don't have ASTM compounds at this step any more, such as Octane, Nonane. Also, THe RT1 of another ASTM compounds "Benzene, propyl-" is ~19.04, which deviates drastically from the normal RT1 of this compound ~14.41 !!!!
+(Update 16th May 2024:) 
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 count_ASTM <- function(data, ASTM_list, which_step) {
@@ -307,10 +309,65 @@ count_ASTM <- function(data, ASTM_list, which_step) {
 count_ASTM(df_step1.1, ASTM_list, which_step = "STEP 1.1")
 count_ASTM(bind_rows(bm_df), ASTM_list, which_step = "STEP 1.2")
 count_ASTM(shared_comp_rt10.1, ASTM_list, which_step = "STEP 2")
+
+
+### Overlaying Scatter plot to confirm ASTM of RT windows
+ASTM_subset <- ASTM_list %>% 
+  mutate(type = "ASTM") %>% 
+  filter(!is.na(Group))
+
+data <- subset.data.frame(alignment, 
+                  select = c("Feature", "RT1", "RT2", "Ion1", "Ion2")) %>% 
+  mutate(Group = "aligned compounds",
+         type = "Sample")
+
+colnames(data)[1] <- "Compound"
+
+# Visual estimation of how much adjustment needed prior to the adjustment
+plotly::ggplotly(ggplot(data = data, aes(x = RT1, y = RT2, label = Compound)) +
+                   geom_point(pch = 1, size = 0.5) +
+                   geom_point(data = ASTM_subset, pch = 4, size = 1.5,
+                              aes(x=RT1, y= RT2, 
+                                  colour = Group)))
+
 ```
 
 
-# STEP 3: Missing value imputation
+# STEP 3: Identify shared and unique compound groups across samples
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+
+filter_alignment <- comp_filter(alignment)
+
+shared_comp_alignment <- alignment[filter_alignment[[1]],]
+```
+
+### Catch by compound name
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+step3 <- df_step1.2 %>%
+  filter(Area > 300000) %>%
+  filter(!is.na(Compound))
+
+unique_comp <- c()
+# all_unique_compounds_idx <- c()
+
+for (comp_grp in unique(step3$Compound)) {
+  idx <- which(grepl(comp_grp, step3$Compound, fixed = TRUE))
+  
+  if (length(unique(step3[idx,]$Sample_name)) < 2) {
+    print(comp_grp)
+    unique_comp <- c(unique_comp, comp_grp)
+    next
+  }
+}
+
+shared_comp_alignment <- step3 %>% filter(Compound %notin% unique_comp)
+```
+
+
+
+
+
+# STEP 4: Missing value imputation
 (Update 21 April 2024:) After remove compounds appear in only one sample and compounds that have >90% Missing values -> plot histogram of distribution -> most of compounds are < 2e+06 => try filter all peaks that is >= 2e+06
 
 ## Investigate data distribution for eremoval of compounds with high mean and low variance
@@ -322,7 +379,7 @@ hist((shared_comp_alignment %>%
 
 
 summary_table <- shared_comp_alignment %>%
-  group_by(Feature) %>%
+  group_by(Compound) %>%
   summarise(
     mean_RT1 = mean(RT1),
     mean_RT2 = mean(RT2),
@@ -335,7 +392,7 @@ summary_table <- shared_comp_alignment %>%
   ) %>%
   ungroup() %>%
   mutate(
-    compound_name = Feature  # Create a new column for compound_name
+    compound_name = Compound  # Create a new column for compound_name
   ) %>%
   select(compound_name, mean_Area, sd_Area, mean_RT1, sd_RT1, mean_RT2, sd_RT2, Ion1, Ion2)  # Select columns for the summary table
 
@@ -385,8 +442,9 @@ df_step3 <- shared_comp_alignment %>%
     .after = 1)
 ```
 
+### REMOVE COMPOUNDS THAT HAVE >90% MISSING VALUES ----------------
+
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-## REMOVE COMPOUNDS THAT HAVE >90% MISSING VALUES ----------------
 col_90na <- c()
 for (col in 5:ncol(df_step3)) {
   if (sum(!is.na(df_step3[,col]))/dim(df_step3)[1] < 0.1) {
@@ -460,7 +518,7 @@ for (r in 1:nrow(df_step3)) {
 
 ### Percentage-based normalization
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-comp_normalized_rt10.1 <- as.data.frame(t(apply(df_step3[, 2:ncol(df_step3)],
+comp_normalized_rt10.1 <- as.data.frame(t(apply(df_step3[, 5:ncol(df_step3)],
                                                 MARGIN = 1, 
                                                 function(row) {row/sum(row, na.rm = TRUE)}))) 
 
@@ -468,9 +526,11 @@ comp_normalized_rt10.1 <- as.data.frame(t(apply(df_step3[, 2:ncol(df_step3)],
 comp_normalized_rt10.1 <- comp_normalized_rt10.1 %>% 
   mutate(Octane_rating = df_step3$Octane_rating) %>%
   mutate(sampling_season = df_step3$sampling_season) %>%
-  mutate(gas_station = df_step3$gas_station)
-  mutate(Sample_name = df_step3$Sample_name)
+  mutate(gas_station = df_step3$gas_station) %>%
+  mutate(Sample_name = df_step3$Sample_name) %>%
+  relocate(Octane_rating, sampling_season, gas_station, Sample_name, .before = 1)
 ```
+
 
 ### Log normalization
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
@@ -480,12 +540,13 @@ comp_normalized_rt10.1 <- log_normalized_df %>%
   mutate(Octane_rating = df_step3$Octane_rating) %>%
   mutate(sampling_season = df_step3$sampling_season) %>%
   mutate(gas_station = df_step3$gas_station) %>%
-  mutate(Sample_name = df_step3$Sample_name)
+  mutate(Sample_name = df_step3$Sample_name) %>%
+  relocate(Octane_rating, sampling_season, gas_station, Sample_name, .before = 1)
 ```
 
 # Export file for ML
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-writexl::write_xlsx(comp_normalized_rt10.1, path = paste0(getwd(), "/python/arson.xlsx"))
+writexl::write_xlsx(comp_normalized_rt10.1, path = paste0(getwd(), "/python/arson_min.xlsx"))
 ```
 
 
@@ -606,7 +667,7 @@ factoextra::fviz_pca_biplot(res.pca,
 
 ## HCA
 ```{r, echo=FALSE, warning = FALSE, message=FALSE}
-hc_df <- comp_normalized_rt10.1 %>% select(-c("Octane_rating", "sampling_season", "gas_station","Sample_name"))
+hc_df <- comp_normalized_rt10.1[, -c(1:4)]
 
 ## Dissimilarity Indices Calculated by vegan::vegdist()
 hca_samp <- stats::hclust(vegan::vegdist(hc_df,
@@ -615,10 +676,11 @@ hca_samp <- stats::hclust(vegan::vegdist(hc_df,
 plot(hca_samp,
      labels = comp_normalized_rt10.1$Sample_name,
      hang = -1,
-     main = "")
+     main = "", cex = 1.25)
 ```    
 
 ## t-SNE
+
 ```{r, echo=FALSE, warning = FALSE, message=FALSE}
 # REFERENCES VISUALIZATION: 
 # https://plotly.com/r/t-sne-and-umap-projections/
@@ -627,19 +689,19 @@ plot(hca_samp,
 library(tsne)
 library(plotly)
 
-features <- subset(df_step3, select = 5:ncol(df_step3))
+features <- subset(comp_normalized_rt10.1, select = 5:ncol(df_step3))
 
 tsne <- tsne(features,
              initial_dims = 3, 
              k = 3, 
-             perplexity = 20, # Hyperparameter: perplexity (optimal number of neighbors) < number of samples
+             perplexity = 30, # Hyperparameter: perplexity (optimal number of neighbors) < number of samples
              max_iter = 5000
              )
 
-pdb <- cbind(data.frame(tsne), df_step3$samp_event)
+pdb <- cbind(data.frame(tsne), comp_normalized_rt10.1$Octane_rating)
 options(warn = -1)
 tsne_plot <- plot_ly(data = pdb ,x =  ~X1, y = ~X2, z = ~X3, 
-               color = ~df_step3$samp_event) %>% 
+               color = ~comp_normalized_rt10.1$Octane_rating) %>% 
   add_markers(size = 8) %>%
   layout( 
     xaxis = list(
@@ -658,19 +720,19 @@ tsne_plot
 ## UMAP clustering 
 
 ```{r, echo=FALSE, warning = FALSE, message=FALSE}
-library(umap)
+features <- comp_normalized_rt10.1[, -c(1:4)]
 
-features <- comp_normalized_rt10.1 %>% select(-c("Octane_rating", "sampling_season", "gas_station","Sample_name"))
+umap <- umap(features, n_components = 3,
+             alpha = 0.0001, gamma = 0.0001,
+             metric = "pearson2") # euclidean, manhattan, cosine, pearson, pearson2
 
-umap <- umap(features, n_components = 3)
-
-layout <- cbind(data.frame(umap[["layout"]]), comp_normalized_rt10.1$gas_station)
+layout <- cbind(data.frame(umap[["layout"]]), comp_normalized_rt10.1$Octane_rating)
 umap_plot <- plot_ly(layout, x = ~X1, y = ~X2, z = ~X3, 
-                color = ~comp_normalized_rt10.1$gas_station) %>% 
+                color = ~comp_normalized_rt10.1$Octane_rating) %>% 
   add_markers() %>%
-  layout(scene = list(xaxis = list(title = 'x-axis'), 
-                                   yaxis = list(title = 'y-axis'), 
-                                   zaxis = list(title = 'z-axis'))) 
+  layout(scene = list(xaxis = list(title = 'x-axis'),
+                                   yaxis = list(title = 'y-axis'),
+                                   zaxis = list(title = 'z-axis')))
 umap_plot
 ```
 
@@ -707,10 +769,11 @@ car::leveneTest(data ~ group, data = non_norm_dist_data)
 # Fligner-Killeen test
 stats::fligner.test(data ~ group, data = non_norm_dist_data)
 ```
-Here, multiple Wilcoxon tests followed by p-value correction for multiple testing was done. Different method for p-value correction from function *p.adjust* from package **stats** were used. After p-value correction, the threshold for p-value can be set (for example,p.adjust \< 0.05 or \< 0.1), to see how it affects the number of significant compounds that can be found. Importantly, the threshold should be set so that it can include as many ASTM reference compounds in the list of significant compounds as possible. For example here, no significant compounds can be found with adjusted p-value \< 0.05. But when adjusted p-value is \< 0.1, 127 significant compounds are found.
 
 
 ### Between gas station
+
+(Update 14th May 2024:) 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 sig_comp <- list()
 j <- 1
