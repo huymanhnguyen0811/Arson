@@ -119,7 +119,7 @@ comp_filter <- function(data) {
 
 # STEP 1.1: Data import
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-ASTM_list <- read_xlsx("ILR Compound List 05-15-2024.xlsx")
+ASTM <- read_xlsx("ILR Compound List 05-15-2024_Without DieselASTM.xlsx")
 file_path <- "Gasolines_BOP_110424.xlsx"
 
 dfs <- excel_sheets(file_path) %>%
@@ -284,13 +284,13 @@ alignment <- grouping_comp_ver1(df_step1.2 %>%
 (Update 16th May 2024:) 
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-count_ASTM <- function(data, ASTM_list, which_step) {
+count_ASTM <- function(data, ASTM, which_step) {
   count <- 0
   for (r in 1:nrow(ASTM_list)) {
-    rt1 <- ASTM_list[r,]$RT1
-    rt2 <- ASTM_list[r,]$RT2
-    ion1 <- ASTM_list[r,]$Ion1
-    ion2 <- ASTM_list[r,]$Ion2
+    rt1 <- ASTM[r,]$RT1
+    rt2 <- ASTM[r,]$RT2
+    ion1 <- ASTM[r,]$Ion1
+    ion2 <- ASTM[r,]$Ion2
     idx <- which(data$RT1 <= (rt1 + 0.3) & data$RT1 >= (rt1 - 0.3) & 
                    data$RT2 <= (rt2 + 0.15) & data$RT2 >= (rt2 - 0.15) & 
                    # Tolerance ion window of 0.5 for ASTM compounds
@@ -306,36 +306,25 @@ count_ASTM <- function(data, ASTM_list, which_step) {
   print(paste0("The number of ASTM compounds found at ", which_step ," is: ", count))
 }
 
-count_ASTM(df_step1.1, ASTM_list, which_step = "STEP 1.1")
-count_ASTM(bind_rows(bm_df), ASTM_list, which_step = "STEP 1.2")
-count_ASTM(shared_comp_rt10.1, ASTM_list, which_step = "STEP 2")
+count_ASTM(df_step1.1, ASTM, which_step = "STEP 1.1")
+count_ASTM(df_step1.2, ASTM, which_step = "STEP 1.2")
+count_ASTM(alignment, ASTM, which_step = "STEP 2")
 
 
-### Overlaying Scatter plot to confirm ASTM of RT windows
-ASTM_subset <- ASTM_list %>% 
-  mutate(type = "ASTM") %>% 
-  filter(!is.na(Group))
 
-data <- subset.data.frame(alignment, 
-                  select = c("Feature", "RT1", "RT2", "Ion1", "Ion2")) %>% 
-  mutate(Group = "aligned compounds",
-         type = "Sample")
-
-colnames(data)[1] <- "Compound"
-
-# Visual confirmation of appropriate RT windows by checking overlapping of RT1 and RT2 of aligned compounds and ASTMs 
-plotly::ggplotly(ggplot(data = data, aes(x = RT1, y = RT2, label = Compound)) +
+# Overlay Scatter plot as Visual confirmation of appropriate RT windows by checking overlapping of RT1 and RT2 of aligned compounds and ASTMs 
+plotly::ggplotly(ggplot(data = alignment, aes(x = RT1, y = RT2, label = Compound)) +
                    geom_point(pch = 1, size = 0.5) +
-                   geom_point(data = ASTM_subset, pch = 4, size = 1.5,
+                   geom_point(data = ASTM, pch = 4, size = 2,
                               aes(x=RT1, y= RT2, 
-                                  colour = Group)))
+                                  colour = Compound)) + 
+                   xlim(5, 40))
 
 ```
 
 
 # STEP 3: Identify shared and unique compound groups across samples
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-
 filter_alignment <- comp_filter(alignment)
 
 shared_comp_alignment <- alignment[filter_alignment[[1]],]
@@ -365,7 +354,41 @@ shared_comp_alignment <- step3 %>% filter(Compound %notin% unique_comp)
 
 
 
+### Use only ASTM compounds
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+ASTM_subset1 <- ASTM %>% 
+  mutate(type = "ASTM") %>% 
+  # filter(!is.na(Group)) %>% 
+  filter(!is.na(RT1))
 
+ASTM_subset2 <- ASTM %>% 
+  mutate(type = "ASTM") %>% 
+  # filter(!is.na(Group)) %>% 
+  filter(is.na(RT1))
+
+ASTM_idx1 <- c()
+ASTM_idx2 <- c()
+
+for (r in 1:nrow(ASTM_subset1)) {
+    rt1 <- ASTM_subset1[r,]$RT1
+    rt2 <- ASTM_subset1[r,]$RT2
+    ion1 <- ASTM_subset1[r,]$Ion1
+    ion2 <- ASTM_subset1[r,]$Ion2
+    idx <- which(alignment$RT1 <= (rt1 + 0.1) & alignment$RT1 >= (rt1 - 0.1) & 
+                   alignment$RT2 <= (rt2 + 0.2) & alignment$RT2 >= (rt2 - 0.2) & alignment$Ion1 <= (ion1 + 0.1) & alignment$Ion1 >= (ion1 - 0.1))
+    ASTM_idx1 <- c(ASTM_idx1, idx)
+}
+
+for (r in 1:nrow(ASTM_subset2)) {
+    ion1 <- ASTM_subset2[r,]$Ion1
+    ion2 <- ASTM_subset2[r,]$Ion2
+    idx <- which(alignment$Ion1 <= (ion1 + 0.1) & alignment$Ion1 >= (ion1 - 0.1) & 
+                   alignment$Ion2 <= (ion2 + 0.1) & alignment$Ion2 >= (ion2 - 0.1))
+    ASTM_idx2 <- c(ASTM_idx2, idx)
+}
+
+ASTM_comp <- alignment[c(ASTM_idx1, ASTM_idx2),]
+```
 
 # STEP 4: Missing value imputation
 (Update 21 April 2024:) After remove compounds appear in only one sample and compounds that have >90% Missing values -> plot histogram of distribution -> most of compounds are < 2e+06 => try filter all peaks that is >= 2e+06
@@ -374,12 +397,12 @@ shared_comp_alignment <- step3 %>% filter(Compound %notin% unique_comp)
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 # Investigate data distribution for removal of compounds with high mean and low variance
-hist((shared_comp_alignment %>%
-  filter(Area < 10000000))$Area)
+# hist((shared_comp_alignment %>%
+#   filter(Area < 10000000))$Area)
 
 
 summary_table <- shared_comp_alignment %>%
-  group_by(Compound) %>%
+  group_by(Feature) %>%
   summarise(
     mean_RT1 = mean(RT1),
     mean_RT2 = mean(RT2),
@@ -392,21 +415,21 @@ summary_table <- shared_comp_alignment %>%
   ) %>%
   ungroup() %>%
   mutate(
-    compound_name = Compound  # Create a new column for compound_name
+    compound_name = Feature  # Create a new column for compound_name
   ) %>%
   select(compound_name, mean_Area, sd_Area, mean_RT1, sd_RT1, mean_RT2, sd_RT2, Ion1, Ion2)  # Select columns for the summary table
 
 # Rename columns
-colnames(summary_table) <- c("compound_name", "mean", "standard_deviation", "meanRT1", "sdRT1", "meanRT2", "sdRT2", "Ion1", "Ion2")
+# colnames(summary_table) <- c("compound_name", "mean_Area", "sd_Area", "meanRT1", "sdRT1", "meanRT2", "sdRT2", "Ion1", "Ion2")
 
 # Print the summary table
-View(summary_table %>% arrange(standard_deviation, desc(mean)))
+# View(summary_table %>% arrange(standard_deviation, desc(mean)))
 
-plotdf <- (summary_table %>% arrange(standard_deviation, desc(mean)))[1:100,]
-ggplot(data = plotdf, aes(x=compound_name, y = mean)) +
+plotdf <- (summary_table %>% arrange(sd_Area, desc(mean_Area)))[1:100,]
+ggplot(data = plotdf, aes(x=compound_name, y = mean_Area)) +
   geom_bar(stat = 'identity', width = 0.5) +
-  geom_errorbar(aes(ymin = mean - standard_deviation,
-                    ymax = mean + standard_deviation, colour = "red")) +
+  geom_errorbar(aes(ymin = mean_Area - sd_Area,
+                    ymax = mean_Area + sd_Area, colour = "red")) +
   ggtitle("Rank 1:100") +
   theme_classic(base_size = 15) +
   theme(axis.text.x = element_text(angle = 90))
@@ -414,9 +437,13 @@ ggplot(data = plotdf, aes(x=compound_name, y = mean)) +
 
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-df_step3 <- shared_comp_alignment %>%
-  # remove top x compounds with high Area and low variance across samples
-  filter(Feature %notin% (summary_table %>% arrange(standard_deviation, desc(mean)))[1:100,]$compound_name) %>%
+# Make a df of compounds with top highest Stan.Dev.
+topsd <- shared_comp_alignment %>%
+  filter(Feature %in% (summary_table %>% arrange(desc(sd_Area)))[1:500,]$compound_name) # desc(mean)
+
+# Combine ASTM with top highest Stan. Dev.
+df_step3 <- shared_comp_alignment %>% 
+  filter(Feature %in% ASTM_comp$Feature) %>% # union(topsd$Feature, ASTM_comp$Feature)
   dplyr::select(
     Sample_name,
     Octane_rating,
@@ -625,6 +652,7 @@ summary(aov(as.formula(paste(paste(setdiff(names(comp_normalized_rt10.1 %>%
 
 (Update 29th April:) 
 **DATA COMPRESSION OR NOT??**
+
 If I **compress all samples into a grouping variables**, such as Octane_rating or sampling_season, I can clearly see the differentiation between these grouping variables. 
 
 **For gas station, ** all 3 imputation techniques all resulted in low Dim1 and Dim2. However, with Zero and Global Min, there seems to be a grouping of gas station no. 2,8,3 (group 1); no. 1, 5 (group 2), no. 10, 4, 9, 7, 6 (group 3).
@@ -637,8 +665,10 @@ I also tried remove the top 100 compounds that have really high mean and low var
 Also, I tried to run PCA with un-normalized data (after imputation) with 3 imputation methods but still no clustering of gas stations across all 3 imputation methods.
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
+input <- comp_normalized_rt10.1
+
 res.pca <- FactoMineR::PCA(
-  df_step3[, 5:ncol(df_step3)],
+  input[, 5:ncol(input)],
   scale.unit = TRUE,
   graph = FALSE)
 
@@ -652,7 +682,7 @@ factoextra::fviz_pca_biplot(res.pca,
                             invisible = "var", 
                             repel = TRUE,
                             labelsize = 10, 
-                            habillage = factor(df_step3$gas_station), # "sampling_season", "Octane_rating", "gas_station", "Sample_name"
+                            habillage = factor(input$sampling_season), # "sampling_season", "Octane_rating", "gas_station", "Sample_name"
                             addEllipses = TRUE,
                             ellipse.level = 0.95,
                             ggtheme = ggplot2::theme_minimal(base_size = 20),
@@ -720,15 +750,17 @@ tsne_plot
 ## UMAP clustering 
 
 ```{r, echo=FALSE, warning = FALSE, message=FALSE}
-features <- comp_normalized_rt10.1[, -c(1:4)]
+input <-  comp_normalized_rt10.1
+
+features <- input[, -c(1:4)]
 
 umap <- umap(features, n_components = 3,
-             alpha = 0.0001, gamma = 0.0001,
+             alpha = 0.00001, gamma = 0.00001,
              metric = "pearson2") # euclidean, manhattan, cosine, pearson, pearson2
 
-layout <- cbind(data.frame(umap[["layout"]]), comp_normalized_rt10.1$Octane_rating)
+layout <- cbind(data.frame(umap[["layout"]]), input$gas_station)
 umap_plot <- plot_ly(layout, x = ~X1, y = ~X2, z = ~X3, 
-                color = ~comp_normalized_rt10.1$Octane_rating) %>% 
+                color = ~input$gas_station) %>% 
   add_markers() %>%
   layout(scene = list(xaxis = list(title = 'x-axis'),
                                    yaxis = list(title = 'y-axis'),
