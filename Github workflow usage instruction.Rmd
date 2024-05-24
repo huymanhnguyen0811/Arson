@@ -267,61 +267,187 @@ grid.arrange(grobs = plot_b, ncol = 5,
 
 
 
+## QUALITY CONTROL TO SELECT ALIGNMENT WINDOW: Confirming targeted compounds at each step of Data processing
+
+(Update 22nd May 2024:) Using the target compound list, we will review 18 samples (6 samples across 3 seasons (p,b,o)) to determine how many samples have the target compounds. This data will help determine the effectiveness of the compression - similar to your microplastic table. 
+
+We want to make sure that it works for all potential types of fuels. 
+
+For the reporting table, there will be cases where the target compounds might not occur in some samples. The best alignment window will be the one that have highest  **"Proportion"** = samples have the target compounds/ 71 (total number of samples in the dataset).
+
+Then, I pick the combination of Rt1 and Rt2 that results in the highest cumulative sum of the **"Proportion"** from all target compound by using **rowSums**.
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+target_comp <- readxl::read_xlsx(path = paste0(getwd(), "/Shortened ILR Compound List PF001A Fixed.xlsx"))
+
+df_step2 <- df_step1.2 %>%
+  filter(Area > 300000) %>% 
+  arrange(RT1, RT2)
+
+# For each target compounds,  Apply different alignment windows and record number of samples that have the target compounds
+combi <- tidyr::crossing(
+  # RT1
+  c(0.1 ,0.15, 0.2, 0.25, 0.3, 0.35, 0.4), 
+  # RT2
+  c(0.12,0.13,0.14,0.15, 0.16, 0.17, 0.18, 0.19, 0.2))
+
+df <- data.frame(RT1_window=integer(), RT2_window=integer(), target=character(), proportion=integer())
+  
+for (i in 1:nrow(combi)) {
+  for (j in 1:nrow(target_comp)) {
+    # Catch all peaks in dataframe that falling into the window with target compounds as center of the window
+    idx1 <- which((df_step2$Ion1 <= (target_comp[j,]$Ion1 + 0.1) & df_step2$Ion1 >= (target_comp[j,]$Ion1 - 0.1) & 
+                   df_step2$Ion2 <= (target_comp[j,]$Ion2 + 0.1) & df_step2$Ion2 >= (target_comp[j,]$Ion2 - 0.1)) |
+                    
+                   (df_step2$Ion1 <= (target_comp[j,]$Ion2 + 0.1) & df_step2$Ion1 >= (target_comp[j,]$Ion2 - 0.1) &
+                   df_step2$Ion2 <= (target_comp[j,]$Ion1 + 0.1) & df_step2$Ion2 >= (target_comp[j,]$Ion1 - 0.1)))
+    
+    temp <- df_step2[idx1,]
+    idx2 <- which(temp$RT1 <= (target_comp[j,]$RT1 + as.numeric(combi[i,][1])) & 
+                    temp$RT1 >= (target_comp[j,]$RT1 - as.numeric(combi[i,][1])) &
+                    temp$RT2 <= (target_comp[j,]$RT2 + as.numeric(combi[i,][2])) & 
+                    temp$RT2 >= (target_comp[j,]$RT2 - as.numeric(combi[i,][2])))
+    
+    df[nrow(df) + 1,] <- c(as.numeric(combi[i,][1]),
+                           as.numeric(combi[i,][2]),
+                           target_comp[j,]$Compound,
+                           # paste0(length(unique(temp[idx2,]$Sample_name)), "/", 71))
+                           100*(length(unique(temp[idx2,]$Sample_name)) / 71))
+  }
+}
+
+summary_df <- df %>% pivot_wider(names_from = target, values_from = proportion)
+
+# Which window have the highest proportion of samples that have the target compounds
+summary_df[, 3:ncol(summary_df)] <- lapply(summary_df[, 3:ncol(summary_df)], as.numeric)
+max_row <- summary_df[which.max(rowSums(summary_df[, 3:ncol(summary_df)])), ]
+print(max_row)
+
+i <- 3
+for (j in 1:nrow(target_comp)) {
+  idx1 <- which((df_step2$Ion1 <= (target_comp[j,]$Ion1 + 0.1) & df_step2$Ion1 >= (target_comp[j,]$Ion1 - 0.1) & 
+                   df_step2$Ion2 <= (target_comp[j,]$Ion2 + 0.1) & df_step2$Ion2 >= (target_comp[j,]$Ion2 - 0.1)) |
+                  
+                  (df_step2$Ion1 <= (target_comp[j,]$Ion2 + 0.1) & df_step2$Ion1 >= (target_comp[j,]$Ion2 - 0.1) &
+                     df_step2$Ion2 <= (target_comp[j,]$Ion1 + 0.1) & df_step2$Ion2 >= (target_comp[j,]$Ion1 - 0.1)))
+  
+  temp <- df_step2[idx1,]
+  idx2 <- which(temp$RT1 <= (target_comp[j,]$RT1 + as.numeric(max_row$RT1_window)) & 
+                  temp$RT1 >= (target_comp[j,]$RT1 - as.numeric(max_row$RT1_window)) &
+                  temp$RT2 <= (target_comp[j,]$RT2 + as.numeric(max_row$RT2_window)) & 
+                  temp$RT2 >= (target_comp[j,]$RT2 - as.numeric(max_row$RT2_window)))
+  
+  colnames(summary_df)[i] <- paste0(target_comp[j,]$Compound, " (n = ", length(unique(temp[idx2,]$Sample_name)), ")")
+  i <- i + 1 
+}
+
+writexl::write_xlsx(summary_df, path = paste0(getwd(), "/Testing combinations of Retention time window for compound alignment.xlsx"))
+
+# Make a table for the compounds that was not found in all samples, give the names of the samples where these target compounds are missing
+summary_df2 <- data.frame(target=character(), missing_sample=character())
+for (j in 1:nrow(target_comp)) {
+  idx1 <- which((df_step2$Ion1 <= (target_comp[j,]$Ion1 + 0.1) & df_step2$Ion1 >= (target_comp[j,]$Ion1 - 0.1) & 
+                   df_step2$Ion2 <= (target_comp[j,]$Ion2 + 0.1) & df_step2$Ion2 >= (target_comp[j,]$Ion2 - 0.1)) |
+                  
+                  (df_step2$Ion1 <= (target_comp[j,]$Ion2 + 0.1) & df_step2$Ion1 >= (target_comp[j,]$Ion2 - 0.1) &
+                     df_step2$Ion2 <= (target_comp[j,]$Ion1 + 0.1) & df_step2$Ion2 >= (target_comp[j,]$Ion1 - 0.1)))
+  
+  temp <- df_step2[idx1,]
+  idx2 <- which(temp$RT1 <= (target_comp[j,]$RT1 + as.numeric(max_row$RT1_window)) & 
+                  temp$RT1 >= (target_comp[j,]$RT1 - as.numeric(max_row$RT1_window)) &
+                  temp$RT2 <= (target_comp[j,]$RT2 + as.numeric(max_row$RT2_window)) & 
+                  temp$RT2 >= (target_comp[j,]$RT2 - as.numeric(max_row$RT2_window)))
+  if (length(unique(temp[idx2,]$Sample_name)) < 71) {
+    summary_df2[nrow(summary_df2) + 1,] <- c(target_comp[j,]$Compound,
+                                             paste(setdiff(unique(df_step2$Sample_name), 
+                                                           unique(temp[idx2,]$Sample_name)), 
+                                                   collapse = ", "))
+  } else {
+    print(ggplot(data = temp[idx2,], aes(x = Sample_name, y = Area, fill = Octane_rating)) + 
+      geom_bar(stat = "identity") +
+      labs(title = target_comp[j,]$Compound, 
+           x = "Samples", y = "Peak Area",
+           fill = "Gas Stations") +
+      theme_minimal(base_size = 20) +
+      theme(axis.text.x = element_text(angle = 90, hjust =0.5, vjust = 0.25, color = "black", face = "bold"), 
+            axis.ticks.length.x = unit(0, "cm"),
+            panel.grid.minor.x = element_blank(),
+            panel.grid.minor.y = element_blank()) + 
+      scale_y_continuous(expand = c(0,0)))
+  }
+}
+
+writexl::write_xlsx(summary_df2, path = paste0(getwd(), "/Samples where target compounds are missing.xlsx"))
+```
+
 # STEP 2: Grouping compounds based on RT1, RT2, Ion1, Ion2 and Filt
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-alignment <- grouping_comp_ver1(df_step1.2 %>%
-                               filter(Area > 300000) %>% 
-                               arrange(RT1, RT2),
-                             rt1thres = 0.3,
-                             rt2thres = 0.15,
+alignment <- grouping_comp_ver1(df_step2,
+                             rt1thres = 0.4,
+                             rt2thres = 0.16,
                              ion1thres = 0.05, # Ion 1 and 2 indicates molecular structure (2 most prevalent mass-to-charge)
                              ion2thres = 0.05)
 ```
 
-## QUALITY CONTROL: Confirming ASTM at each step of Data processing
+(Update 22nd May 2024:) The alignment is based on pF001A, align all peaks in data set with each peak of pF001A.
 
-(Update 16th May 2024:) 
+*** take  the peaks that was aligned to target compound list and try clustering.
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-count_ASTM <- function(data, ASTM, which_step) {
-  count <- 0
-  for (r in 1:nrow(ASTM_list)) {
-    rt1 <- ASTM[r,]$RT1
-    rt2 <- ASTM[r,]$RT2
-    ion1 <- ASTM[r,]$Ion1
-    ion2 <- ASTM[r,]$Ion2
-    idx <- which(data$RT1 <= (rt1 + 0.3) & data$RT1 >= (rt1 - 0.3) & 
-                   data$RT2 <= (rt2 + 0.15) & data$RT2 >= (rt2 - 0.15) & 
-                   # Tolerance ion window of 0.5 for ASTM compounds
-                   data$Ion1 <= (ion1 + 0.05) & data$Ion1 >= (ion1 - 0.05) & 
-                   data$Ion2 <= (ion2 + 0.05) & data$Ion2 >= (ion2 - 0.05))
-    
-    if (length(idx) > 0) {
-      count <- count + 1
-    } else {
-      next
-    }
-  }
-  print(paste0("The number of ASTM compounds found at ", which_step ," is: ", count))
+dflist <- list()
+i <- 1
+for (j in 1:nrow(target_comp)) {
+  # Catch all peaks in dataframe that falling into the window with target compounds as center of the window
+  idx1 <- which((df_step2$Ion1 <= (target_comp[j,]$Ion1 + 0.1) & df_step2$Ion1 >= (target_comp[j,]$Ion1 - 0.1)) | # & 
+                  # df_step2$Ion2 <= (target_comp[j,]$Ion2 + 0.1) & df_step2$Ion2 >= (target_comp[j,]$Ion2 - 0.1)
+                  
+                  (df_step2$Ion1 <= (target_comp[j,]$Ion2 + 0.1) & df_step2$Ion1 >= (target_comp[j,]$Ion2 - 0.1) # &
+                   # df_step2$Ion2 <= (target_comp[j,]$Ion1 + 0.1) & df_step2$Ion2 >= (target_comp[j,]$Ion1 - 0.1
+                  ))
+  
+  temp <- df_step2[idx1,]
+  idx2 <- which(temp$RT1 <= (target_comp[j,]$RT1 + 0.4) & 
+                  temp$RT1 >= (target_comp[j,]$RT1 - 0.4) &
+                  temp$RT2 <= (target_comp[j,]$RT2 + 0.16) & 
+                  temp$RT2 >= (target_comp[j,]$RT2 - 0.16))
+  
+  dflist[[i]] <- temp[idx2,] %>% mutate(Feature = paste0("Compound_", i, "."))
+  i <- i + 1
 }
+    
+test <- bind_rows(dflist)
+filter_alignment <- comp_filter(test)
 
-count_ASTM(df_step1.1, ASTM, which_step = "STEP 1.1")
-count_ASTM(df_step1.2, ASTM, which_step = "STEP 1.2")
-count_ASTM(alignment, ASTM, which_step = "STEP 2")
-
-
-
-# Overlay Scatter plot as Visual confirmation of appropriate RT windows by checking overlapping of RT1 and RT2 of aligned compounds and ASTMs 
-plotly::ggplotly(ggplot(data = alignment, aes(x = RT1, y = RT2, label = Compound)) +
-                   geom_point(pch = 1, size = 0.5) +
-                   geom_point(data = ASTM, pch = 4, size = 2,
-                              aes(x=RT1, y= RT2, 
-                                  colour = Compound)) + 
-                   xlim(5, 40))
-
+shared_comp_alignment <- test[filter_alignment[[1]],]
 ```
 
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+# Overlay Scatter plot as Visual confirmation of appropriate RT windows by checking overlapping of RT1 and RT2 of aligned compounds and target compounds 
+plotlist <- list()
+i <- 1
+for (j in 1:nrow(target_comp)) {
+  idx1 <- which((alignment$Ion1 <= (target_comp[j,]$Ion1 + 0.1) & alignment$Ion1 >= (target_comp[j,]$Ion1 - 0.1)) | 
+                  (alignment$Ion1 <= (target_comp[j,]$Ion2 + 0.1) & alignment$Ion1 >= (target_comp[j,]$Ion2 - 0.1)))
+  
+  temp <- alignment[idx1,]
+  idx2 <- which(temp$RT1 <= (target_comp[j,]$RT1 + 0.4) & 
+                  temp$RT1 >= (target_comp[j,]$RT1 - 0.4) &
+                  temp$RT2 <= (target_comp[j,]$RT2 + 0.16) & 
+                  temp$RT2 >= (target_comp[j,]$RT2 - 0.16))
+  plotlist[[i]] <- temp[idx2,]
+  i <- i + 1
+}
+
+plotdf <- bind_rows(plotlist)
+
+plotly::ggplotly(ggplot() +
+                   geom_point(data = plotdf, aes(x = RT1, y = RT2, colour = Feature), pch = 1, size = 0.5) +
+                   geom_point(data = target_comp, pch = 4, size = 2, colour = "red",
+                              aes(x=RT1, y= RT2, label = Compound)) + 
+                   xlim(5, 40))
+```
 
 # STEP 3: Identify shared and unique compound groups across samples
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
@@ -390,6 +516,7 @@ for (r in 1:nrow(ASTM_subset2)) {
 ASTM_comp <- alignment[c(ASTM_idx1, ASTM_idx2),]
 ```
 
+
 # STEP 4: Missing value imputation
 (Update 21 April 2024:) After remove compounds appear in only one sample and compounds that have >90% Missing values -> plot histogram of distribution -> most of compounds are < 2e+06 => try filter all peaks that is >= 2e+06
 
@@ -441,9 +568,12 @@ ggplot(data = plotdf, aes(x=compound_name, y = mean_Area)) +
 topsd <- shared_comp_alignment %>%
   filter(Feature %in% (summary_table %>% arrange(desc(sd_Area)))[1:500,]$compound_name) # desc(mean)
 
-# Combine ASTM with top highest Stan. Dev.
+
 df_step3 <- shared_comp_alignment %>% 
-  filter(Feature %in% ASTM_comp$Feature) %>% # union(topsd$Feature, ASTM_comp$Feature)
+  #$$# Combine ASTM with top highest Stan. Dev.
+  # filter(Feature %in% topsd$Feature) %>% # union(topsd$Feature, ASTM_comp$Feature)
+  #$$# remove top compounds with high area and low sd
+  # filter(Feature %notin% (summary_table %>% arrange(sd_Area, desc(mean_Area)))[1:100,]$compound_name) %>% 
   dplyr::select(
     Sample_name,
     Octane_rating,
@@ -462,10 +592,10 @@ df_step3 <- shared_comp_alignment %>%
   tidyr::pivot_wider(names_from = Feature,
                      values_from = Area) %>%
   relocate(
+    Sample_name,
     Octane_rating,
     sampling_season,
     gas_station,
-    Sample_name,
     .after = 1)
 ```
 
@@ -515,15 +645,8 @@ for (r in 1:nrow(df_step3)) {
 }
 ```
 
-## Option 2: Minimum 
-```{r , echo=FALSE, warning = FALSE, message=FALSE}
-for (r in 1:nrow(df_step3)) { 
-  df_step3[r, which(base::is.na(df_step3[r,]))] <- min(shared_comp_alignment$Area)
-} 
-```
-
-## Option 3: LOD 
-LOD = go through each row of the df and replacing missing values multiply the lowest values of each sample by 3
+## Option 2: LOD 
+LOD = go through each row of the df and replacing missing values = the lowest values of each sample * 3
 
 ```{r , echo=FALSE, warning = FALSE, message=FALSE}
 for (r in 1:nrow(df_step3[, 5:ncol(df_step3)])) { 
@@ -532,7 +655,7 @@ for (r in 1:nrow(df_step3[, 5:ncol(df_step3)])) {
 
 ```
 
-## Option 4: Randomized values drawn from uniform distribution of the two global minimum values
+## Option 3: Randomized values drawn from uniform distribution of the two global minimum values
 ```{r , echo=FALSE, warning = FALSE, message=FALSE}
 for (r in 1:nrow(df_step3)) { 
   df_step3[r, which(base::is.na(df_step3[r,]))] <- as.list(runif(length(which(is.na(df_step3[r,]))),
@@ -576,6 +699,13 @@ comp_normalized_rt10.1 <- log_normalized_df %>%
 writexl::write_xlsx(comp_normalized_rt10.1, path = paste0(getwd(), "/python/arson_min.xlsx"))
 ```
 
+# Exploratory Data Analysis
+
+### Data distribution of top 10 compound with highest mean and highest sd. among gas stations
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+
+```
 
 # Clustering analyses
 ## ANOVA 
@@ -664,8 +794,12 @@ I also tried remove the top 100 compounds that have really high mean and low var
 
 Also, I tried to run PCA with un-normalized data (after imputation) with 3 imputation methods but still no clustering of gas stations across all 3 imputation methods.
 
+(Update 22nd May 2024:) 
+ - Clustering again with 'optimized' alignment windows -> No cluster of gas station
+ - Use only target compounds -> Still No cluster of gas station either with zero or LOD imputation coupled with TSN or Log normalization.
+
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-input <- comp_normalized_rt10.1
+input <- df_step3
 
 res.pca <- FactoMineR::PCA(
   input[, 5:ncol(input)],
@@ -673,7 +807,7 @@ res.pca <- FactoMineR::PCA(
   graph = FALSE)
 
 # Scree plot
-fviz_screeplot(res.pca, ncp=10)
+# fviz_screeplot(res.pca, ncp=10)
 
 # Biplot
 factoextra::fviz_pca_biplot(res.pca,  
@@ -682,7 +816,7 @@ factoextra::fviz_pca_biplot(res.pca,
                             invisible = "var", 
                             repel = TRUE,
                             labelsize = 10, 
-                            habillage = factor(input$sampling_season), # "sampling_season", "Octane_rating", "gas_station", "Sample_name"
+                            habillage = factor(input$gas_station), # "sampling_season", "Octane_rating", "gas_station", "Sample_name"
                             addEllipses = TRUE,
                             ellipse.level = 0.95,
                             ggtheme = ggplot2::theme_minimal(base_size = 20),
@@ -692,10 +826,12 @@ factoextra::fviz_pca_biplot(res.pca,
   # ggforce::geom_mark_ellipse(aes(fill = Groups,
   #                                color = Groups),
   #                            label.buffer = unit(40, 'mm')) +
-  theme(legend.position = 'bottom') + coord_equal()
+  theme(legend.position = 'bottom',
+        panel.spacing = unit(0, "lines")) + coord_equal()
 ```
 
 ## HCA
+
 ```{r, echo=FALSE, warning = FALSE, message=FALSE}
 hc_df <- comp_normalized_rt10.1[, -c(1:4)]
 
@@ -750,7 +886,7 @@ tsne_plot
 ## UMAP clustering 
 
 ```{r, echo=FALSE, warning = FALSE, message=FALSE}
-input <-  comp_normalized_rt10.1
+input <- comp_normalized_rt10.1
 
 features <- input[, -c(1:4)]
 
@@ -763,11 +899,15 @@ umap_plot <- plot_ly(layout, x = ~X1, y = ~X2, z = ~X3,
                 color = ~input$gas_station) %>% 
   add_markers() %>%
   layout(scene = list(xaxis = list(title = 'x-axis'),
-                                   yaxis = list(title = 'y-axis'),
-                                   zaxis = list(title = 'z-axis')))
+                      yaxis = list(title = 'y-axis'),
+                      zaxis = list(title = 'z-axis')))
 umap_plot
 ```
 
+## Correlation heat map between gas stations
+```{r, echo=FALSE, warning = FALSE, message=FALSE}
+
+```
 
 ## Multiple Wilcoxon tests with p-value correction for multiple testing
 
@@ -805,29 +945,31 @@ stats::fligner.test(data ~ group, data = non_norm_dist_data)
 
 ### Between gas station
 
-(Update 14th May 2024:) 
+(Update 22th May 2024:)  Run tests again with:
+ -  'optimized' alignment windows -> No cluster of gas station
+ - Use only target compounds -> Still No cluster of gas station either with zero or LOD imputation coupled with TSN or Log normalization. 
+ 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
+input <- df_step3
+
 sig_comp <- list()
 j <- 1
 
 df <- data.frame(Feature=character(), comparison_pair=character(), pval_wilcox_test=integer())
 
-df_filtered <- comp_normalized_rt10.1[!(comp_normalized_rt10.1$Octane_rating %in% names(table(comp_normalized_rt10.1$Octane_rating)[table(comp_normalized_rt10.1$Octane_rating) < 3])),] %>% 
-  select(-c("sampling_season", "gas_station")) %>%
-  relocate(Octane_rating, .before = 1)
-
-for (c in 2:ncol(df_filtered)) {      
+for (c in 5:ncol(input)) {      
   # looping through the combinations of product categories 
-  for (col in 1:ncol(utils::combn(unique(df_filtered$Octane_rating), 2))) {
+  for (col in 1:ncol(utils::combn(unique(input$gas_station), 2))) {
     # extract the combinations of product category pairs
-    p_1 <- utils::combn(unique(df_filtered$Octane_rating), 2)[1,col]
-    p_2 <- utils::combn(unique(df_filtered$Octane_rating), 2)[2,col]
+    p_1 <- utils::combn(unique(input$gas_station), 2)[1,col]
+    p_2 <- utils::combn(unique(input$gas_station), 2)[2,col]
     
+    temp <- 
     # calculating the p-value between each gas station pair 
-    pval_wilcox_test <- wilcox.test(as.numeric(unlist(df_filtered[which(df_filtered$Octane_rating == p_1), 2])), # number "2" here is because we slice in the 2nd column of the subset dataframe
-                                    as.numeric(unlist(df_filtered[which(df_filtered$Octane_rating == p_2), 2])))$p.value
+    pval_wilcox_test <- wilcox.test(as.numeric(unlist(input[which(input$gas_station == p_1), c])), # number "2" here is because we slice in the 2nd column of the subset dataframe
+                                    as.numeric(unlist(input[which(input$gas_station == p_2), c])))$p.value
     # assigning row information
-    df[nrow(df) + 1,] <- c(colnames(df_filtered)[c], 
+    df[nrow(df) + 1,] <- c(colnames(input)[c], 
                            paste0(p_1, " & ", p_2), 
                            pval_wilcox_test)
   }
