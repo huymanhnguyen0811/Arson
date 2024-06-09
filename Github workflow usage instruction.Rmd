@@ -167,6 +167,10 @@ for (filter_comp in filter_list) {
   df_step1.2 <- df_step1.2 %>%
       filter(!grepl(filter_comp, Compound))
 }
+
+df_step2 <- df_step1.2 %>%
+  filter(Area > 300000) %>% 
+  arrange(RT1, RT2)
 ```
 
 ### Plot benchmark distribution for aligning compounds later
@@ -278,13 +282,9 @@ For the reporting table, there will be cases where the target compounds might no
 Then, I pick the combination of Rt1 and Rt2 that results in the highest cumulative sum of the **"Proportion"** from all target compound by using **rowSums**.
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-target_comp <- readxl::read_xlsx(path = paste0(getwd(), "/Shortened ILR Compound List PF001A Fixed.xlsx"))
+target_comp <- readxl::read_xlsx(path = paste0(getwd(), "/Supplementary Materials.xlsx"), sheet = "List of target compounds")# "/Shortened ILR Compound List PF001A Fixed.xlsx"))
 
-df_step2 <- df_step1.2 %>%
-  filter(Area > 300000) %>% 
-  arrange(RT1, RT2)
-
-# For each target compounds,  Apply different alignment windows and record number of samples that have the target compounds
+# For each target compounds,  Apply different alignment windows and record number of samples that have the =target compounds
 combi <- tidyr::crossing(
   # RT1
   c(0.1 ,0.15, 0.2, 0.25, 0.3, 0.35, 0.4), 
@@ -303,6 +303,12 @@ for (i in 1:nrow(combi)) {
                    df_step2$Ion2 <= (target_comp[j,]$Ion1 + 0.1) & df_step2$Ion2 >= (target_comp[j,]$Ion1 - 0.1)))
     
     temp <- df_step2[idx1,]
+    minrt1 <- max(temp$RT1)
+    maxrt1 <- min(temp$RT1)
+    minrt2 <- max(temp$RT2)
+    maxrt2 <- max(temp$RT2)
+    
+    
     idx2 <- which(temp$RT1 <= (target_comp[j,]$RT1 + as.numeric(combi[i,][1])) & 
                     temp$RT1 >= (target_comp[j,]$RT1 - as.numeric(combi[i,][1])) &
                     temp$RT2 <= (target_comp[j,]$RT2 + as.numeric(combi[i,][2])) & 
@@ -312,7 +318,7 @@ for (i in 1:nrow(combi)) {
                            as.numeric(combi[i,][2]),
                            target_comp[j,]$Compound,
                            # paste0(length(unique(temp[idx2,]$Sample_name)), "/", 71))
-                           100*(length(unique(temp[idx2,]$Sample_name)) / 71))
+                           100*(length(unique(temp[idx2,]$Sample_name)) / length(unique(temp$Sample_name))))
   }
 }
 
@@ -323,6 +329,7 @@ summary_df[, 3:ncol(summary_df)] <- lapply(summary_df[, 3:ncol(summary_df)], as.
 max_row <- summary_df[which.max(rowSums(summary_df[, 3:ncol(summary_df)])), ]
 print(max_row)
 
+# Adding the number of samples where the compounds were found with matching Ion1 and Ion2 to colnames of each compound
 i <- 3
 for (j in 1:nrow(target_comp)) {
   idx1 <- which((df_step2$Ion1 <= (target_comp[j,]$Ion1 + 0.1) & df_step2$Ion1 >= (target_comp[j,]$Ion1 - 0.1) & 
@@ -337,14 +344,96 @@ for (j in 1:nrow(target_comp)) {
                   temp$RT2 <= (target_comp[j,]$RT2 + as.numeric(max_row$RT2_window)) & 
                   temp$RT2 >= (target_comp[j,]$RT2 - as.numeric(max_row$RT2_window)))
   
-  colnames(summary_df)[i] <- paste0(target_comp[j,]$Compound, " (n = ", length(unique(temp[idx2,]$Sample_name)), ")")
+  colnames(summary_df)[i] <- paste0(target_comp[j,]$Compound, " (n = ", length(unique(temp$Sample_name)), ")")
   i <- i + 1 
 }
 
 writexl::write_xlsx(summary_df, path = paste0(getwd(), "/Testing combinations of Retention time window for compound alignment.xlsx"))
+```
+
+# Examine the distribution of RT of target compounds
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+target_comp <- read_xlsx("Shortened ILR Compound List PF001A 07-06-2024.xlsx")
+
+# Get the column names from the existing data frame
+column_names <- c( "Compound", "RT", "of pF001A", "Min.", "1st Qu.", "Median",  "Mean", "3rd Qu.", "Max.")
+# Create an empty data frame with the same column names
+summary_df <- data.frame(matrix(ncol = length(column_names), nrow = 0))
+colnames(summary_df) <- column_names
+
+summary_target_compounds <- list()
+for (j in 1:nrow(target_comp)) {
+    # First for each target compound, matching Major and minor ion 
+    idx1 <- which((df_step2$Ion1 <= (target_comp[j,]$Ion1 + 0.2) & df_step2$Ion1 >= (target_comp[j,]$Ion1 - 0.2) & 
+                   df_step2$Ion2 <= (target_comp[j,]$Ion2 + 0.2) & df_step2$Ion2 >= (target_comp[j,]$Ion2 - 0.2)) |
+                    
+                   (df_step2$Ion1 <= (target_comp[j,]$Ion2 + 0.2) & df_step2$Ion1 >= (target_comp[j,]$Ion2 - 0.2) &
+                   df_step2$Ion2 <= (target_comp[j,]$Ion1 + 0.2) & df_step2$Ion2 >= (target_comp[j,]$Ion1 - 0.2)))
+    
+    temp <- df_step2[idx1,]
+    
+    # Then, for each target compound, matching within RT +- 0.1 wrt the pF001A retention time. 
+    idx2 <- which(temp$RT1 <= (target_comp[j,]$RT1 + 0.1) & 
+                  temp$RT1 >= (target_comp[j,]$RT1 - 0.1) &
+                  temp$RT2 <= (target_comp[j,]$RT2 + 0.1) & 
+                  temp$RT2 >= (target_comp[j,]$RT2 - 0.1))
+    
+    
+    
+    if (nrow(temp[idx2, ]) == 0) {
+      summary_df[nrow(summary_df) + 1,] <- c(paste0(target_comp[j,]$Compound, " was not found with matching ions and within RT1/RT2 windows of 0.1 of pF001A"), NA, NA, NA, NA, NA, NA, NA, NA)
+    } else {
+      
+      # Make descriptive stats summary of RT1 
+      summary_df[nrow(summary_df) + 1,] <- c(target_comp[j,]$Compound,
+                                             "RT1",
+                                             target_comp[j,]$RT1,
+                                             summary(as.numeric(temp[idx2,]$RT1))[[1]],
+                                             summary(as.numeric(temp[idx2,]$RT1))[[2]],
+                                             summary(as.numeric(temp[idx2,]$RT1))[[3]],
+                                             summary(as.numeric(temp[idx2,]$RT1))[[4]],
+                                             summary(as.numeric(temp[idx2,]$RT1))[[5]],
+                                             summary(as.numeric(temp[idx2,]$RT1))[[6]])
+      
+      # Make descriptive stats summary of RT1 
+      summary_df[nrow(summary_df) + 1,] <- c(target_comp[j,]$Compound,
+                                             "RT2",
+                                             target_comp[j,]$RT2,
+                                             summary(as.numeric(temp[idx2,]$RT1))[[1]],
+                                             summary(as.numeric(temp[idx2,]$RT1))[[2]],
+                                             summary(as.numeric(temp[idx2,]$RT1))[[3]],
+                                             summary(as.numeric(temp[idx2,]$RT1))[[4]],
+                                             summary(as.numeric(temp[idx2,]$RT1))[[5]],
+                                             summary(as.numeric(temp[idx2,]$RT1))[[6]])
+      # Make histogram of distribution of RT of these target compound
+      # par(mfrow = c(1, 2))
+      # hist(as.numeric(temp[idx2,]$RT1),
+      #      xlab = "RT1", ylab ="", cex.axis = 2, cex.lab = 2, cex.main = 1,
+      #      main = paste0("RT1 of ", target_comp[j,]$Compound, "\n with pF001A's RT1 = ", target_comp[j,]$RT1, " and RT1 window = 0.1"))
+      # 
+      # hist(as.numeric(temp[idx2,]$RT2), 
+      #      xlab = "RT2", ylab ="", cex.axis = 2, cex.lab = 2, cex.main = 1,
+      #      main = paste0("RT2 of ", target_comp[j,]$Compound, "\n in pF001A's RT2 = ", target_comp[j,]$RT2, " and RT2 window = 0.1"))
+      
+      # Reset the layout to default
+      # par(mfrow = c(1, 1))
+    }
+}
+
+writexl::write_xlsx(summary_df, path = paste0(getwd(), "/summary of target compounds matching by major and minor ions and rt1_rt2 of (0.1).xlsx"))
+```
 
 # Make a table for the compounds that was not found in all samples, give the names of the samples where these target compounds are missing
-summary_df2 <- data.frame(target=character(), missing_sample=character())
+***If the compound can be found in all samples then plot it with x-axis as 71 samples sorted from gas_station 1 to 10, the legend is the sampling season***
+
+(Update 31 May 2024): For the bar plot of target compounds, if the compounds were not presented in a station -> it will have zeros values instead of NA -> it is show in the plot that the compound was not there in certain gas stations.
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+summary_df2 <- data.frame(target=character(), samples_that_missing_target_compound=character())
+
+df_step2 <- df_step2 %>% 
+  mutate(gas_station = factor(gas_station, levels = unique(df_step2$gas_station)))
+
 for (j in 1:nrow(target_comp)) {
   idx1 <- which((df_step2$Ion1 <= (target_comp[j,]$Ion1 + 0.1) & df_step2$Ion1 >= (target_comp[j,]$Ion1 - 0.1) & 
                    df_step2$Ion2 <= (target_comp[j,]$Ion2 + 0.1) & df_step2$Ion2 >= (target_comp[j,]$Ion2 - 0.1)) |
@@ -357,30 +446,82 @@ for (j in 1:nrow(target_comp)) {
                   temp$RT1 >= (target_comp[j,]$RT1 - as.numeric(max_row$RT1_window)) &
                   temp$RT2 <= (target_comp[j,]$RT2 + as.numeric(max_row$RT2_window)) & 
                   temp$RT2 >= (target_comp[j,]$RT2 - as.numeric(max_row$RT2_window)))
+  
   if (length(unique(temp[idx2,]$Sample_name)) < 71) {
     summary_df2[nrow(summary_df2) + 1,] <- c(target_comp[j,]$Compound,
                                              paste(setdiff(unique(df_step2$Sample_name), 
                                                            unique(temp[idx2,]$Sample_name)), 
                                                    collapse = ", "))
+    
+    # Artificial add in the missing samples and put the Area of those sample to be 0
+    empty_df <- temp[idx2,] %>% select(Area, Sample_name, Octane_rating, sampling_season, gas_station) %>% slice(0)
+    new_rows <- data.frame(
+      Area = rep(0, length(setdiff(unique(df_step2$Sample_name), 
+                                   unique(temp[idx2,]$Sample_name)))),
+      Sample_name = setdiff(unique(df_step2$Sample_name), 
+                     unique(temp[idx2,]$Sample_name)),
+      Octane_rating = rep(NA, length(setdiff(unique(df_step2$Sample_name), 
+                                            unique(temp[idx2,]$Sample_name)))),
+      sampling_season = rep(NA, length(setdiff(unique(df_step2$Sample_name), 
+                                              unique(temp[idx2,]$Sample_name)))),
+      gas_station = rep(NA, length(setdiff(unique(df_step2$Sample_name), 
+                                          unique(temp[idx2,]$Sample_name))))
+    )
+    temp2 <- bind_rows(empty_df, new_rows) %>%
+      mutate(Octane_rating = ifelse(str_detect(Sample_name, "A"), "Gas_87", 
+                                    ifelse(str_detect(Sample_name, "B"), "Gas_89",
+                                           ifelse(str_detect(Sample_name, "C"), "Gas_91", "Gas_94")))) %>%
+      mutate(sampling_season = ifelse(str_detect(Sample_name, "b"), "blue",
+                                      ifelse(str_detect(Sample_name, "p"), "purple", "orange"))) %>%
+      mutate(gas_station = ifelse(str_detect(Sample_name, "F001"), "Station_1",
+                                  ifelse(str_detect(Sample_name, "F002"), "Station_2",
+                                         ifelse(str_detect(Sample_name, "F003"), "Station_3",
+                                                ifelse(str_detect(Sample_name, "F004"), "Station_4",
+                                                       ifelse(str_detect(Sample_name, "F005"), "Station_5",
+                                                              ifelse(str_detect(Sample_name, "F006"), "Station_6",
+                                                                     ifelse(str_detect(Sample_name, "F007"), "Station_7",
+                                                                            ifelse(str_detect(Sample_name, "F008"), "Station_8",
+                                                                                   ifelse(str_detect(Sample_name, "F009"), "Station_9", "Station_10")))))))))) %>% 
+      mutate(new_sample_name = paste0(Sample_name, "_", gas_station, "_", Octane_rating))
+    
+    plotdata <- bind_rows(temp2, temp[idx2,] %>% 
+                            select(Area, Sample_name, Octane_rating, sampling_season, gas_station) %>%
+                            mutate(new_sample_name = paste0(Sample_name, "_", gas_station, "_", Octane_rating)))
+    
+    print(ggplot(data = plotdata, aes(x = new_sample_name , y = Area, fill = sampling_season)) + 
+            geom_bar(stat = "identity") +
+            labs(title = target_comp[j,]$Compound, 
+                 x = "Samples", y = "Peak Area",
+                 fill = "") +
+            theme_minimal(base_size = 15) +
+            theme(axis.text.x = element_text(angle = 90, hjust =0.5, vjust = 0.25, color = "black", face = "bold"), 
+                  plot.title = element_text(size = 25),
+                  axis.ticks.length.x = unit(0, "cm"),
+                  panel.grid.minor.x = element_blank(),
+                  panel.grid.minor.y = element_blank()) + 
+            scale_y_continuous(expand = c(0,0)))
   } else {
-    print(ggplot(data = temp[idx2,], aes(x = Sample_name, y = Area, fill = Octane_rating)) + 
-      geom_bar(stat = "identity") +
-      labs(title = target_comp[j,]$Compound, 
-           x = "Samples", y = "Peak Area",
-           fill = "Gas Stations") +
-      theme_minimal(base_size = 20) +
-      theme(axis.text.x = element_text(angle = 90, hjust =0.5, vjust = 0.25, color = "black", face = "bold"), 
-            axis.ticks.length.x = unit(0, "cm"),
-            panel.grid.minor.x = element_blank(),
-            panel.grid.minor.y = element_blank()) + 
-      scale_y_continuous(expand = c(0,0)))
+    temp2 <- temp[idx2,] %>%
+      mutate(new_sample_name = paste0(Sample_name, "_", gas_station, "_", Octane_rating))
+    print(ggplot(data = temp2, aes(x = new_sample_name , y = Area, fill = sampling_season)) + 
+            geom_bar(stat = "identity") +
+            labs(title = target_comp[j,]$Compound, 
+                 x = "Samples", y = "Peak Area",
+                 fill = "") +
+            theme_minimal(base_size = 15) +
+            theme(axis.text.x = element_text(angle = 90, hjust =0.5, vjust = 0.25, color = "black", face = "bold"), 
+                  plot.title = element_text(size = 25),
+                  axis.ticks.length.x = unit(0, "cm"),
+                  panel.grid.minor.x = element_blank(),
+                  panel.grid.minor.y = element_blank()) + 
+            scale_y_continuous(expand = c(0,0)))
   }
 }
 
 writexl::write_xlsx(summary_df2, path = paste0(getwd(), "/Samples where target compounds are missing.xlsx"))
 ```
 
-# STEP 2: Grouping compounds based on RT1, RT2, Ion1, Ion2 and Filt
+# STEP 2: Grouping compounds based on RT1, RT2, Ion1, Ion2
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 alignment <- grouping_comp_ver1(df_step2,
@@ -392,19 +533,18 @@ alignment <- grouping_comp_ver1(df_step2,
 
 (Update 22nd May 2024:) The alignment is based on pF001A, align all peaks in data set with each peak of pF001A.
 
-*** take  the peaks that was aligned to target compound list and try clustering.
+# **Using only target compounds**
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 dflist <- list()
 i <- 1
 for (j in 1:nrow(target_comp)) {
   # Catch all peaks in dataframe that falling into the window with target compounds as center of the window
-  idx1 <- which((df_step2$Ion1 <= (target_comp[j,]$Ion1 + 0.1) & df_step2$Ion1 >= (target_comp[j,]$Ion1 - 0.1)) | # & 
-                  # df_step2$Ion2 <= (target_comp[j,]$Ion2 + 0.1) & df_step2$Ion2 >= (target_comp[j,]$Ion2 - 0.1)
+   idx1 <- which((df_step2$Ion1 <= (target_comp[j,]$Ion1 + 0.1) & df_step2$Ion1 >= (target_comp[j,]$Ion1 - 0.1) & 
+                   df_step2$Ion2 <= (target_comp[j,]$Ion2 + 0.1) & df_step2$Ion2 >= (target_comp[j,]$Ion2 - 0.1)) |
                   
-                  (df_step2$Ion1 <= (target_comp[j,]$Ion2 + 0.1) & df_step2$Ion1 >= (target_comp[j,]$Ion2 - 0.1) # &
-                   # df_step2$Ion2 <= (target_comp[j,]$Ion1 + 0.1) & df_step2$Ion2 >= (target_comp[j,]$Ion1 - 0.1
-                  ))
+                  (df_step2$Ion1 <= (target_comp[j,]$Ion2 + 0.1) & df_step2$Ion1 >= (target_comp[j,]$Ion2 - 0.1) &
+                     df_step2$Ion2 <= (target_comp[j,]$Ion1 + 0.1) & df_step2$Ion2 >= (target_comp[j,]$Ion1 - 0.1)))
   
   temp <- df_step2[idx1,]
   idx2 <- which(temp$RT1 <= (target_comp[j,]$RT1 + 0.4) & 
@@ -422,9 +562,8 @@ filter_alignment <- comp_filter(test)
 shared_comp_alignment <- test[filter_alignment[[1]],]
 ```
 
-
+# Overlay Scatter plot as Visual confirmation of appropriate RT windows by checking overlapping of RT1 and RT2 of aligned compounds and target compounds
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-# Overlay Scatter plot as Visual confirmation of appropriate RT windows by checking overlapping of RT1 and RT2 of aligned compounds and target compounds 
 plotlist <- list()
 i <- 1
 for (j in 1:nrow(target_comp)) {
