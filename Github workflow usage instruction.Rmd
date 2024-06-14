@@ -151,9 +151,11 @@ colnames(df_step1.1)[colnames(df_step1.1) == 'Qual'] <- 'Ion2'
 ```
 
 # STEP 1.2: Filtering out column bleed, solvent and BTEX and MF = 0
+
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 filter_list <- c("^Carbon disulfide$", 
-                "Cyclotrisiloxane..hexamethyl"
+                "Cyclotrisiloxane..hexamethyl",
+                "Cyclotetrasiloxane..octamethyl"
                 # "^Benzene$",
                 # "^Toluene$",
                 # "^Ethylbenzene$",
@@ -351,7 +353,9 @@ for (j in 1:nrow(target_comp)) {
 writexl::write_xlsx(summary_df, path = paste0(getwd(), "/Testing combinations of Retention time window for compound alignment.xlsx"))
 ```
 
-# Examine the distribution of RT of target compounds
+
+# QUALITY CONTROL: Examine the distribution of RT of target compounds based on pF001A
+(Update 10th June 2024:) Most of the compounds are found, except for 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 target_comp <- read_xlsx("Shortened ILR Compound List PF001A 07-06-2024.xlsx")
 
@@ -399,12 +403,12 @@ for (j in 1:nrow(target_comp)) {
       summary_df[nrow(summary_df) + 1,] <- c(target_comp[j,]$Compound,
                                              "RT2",
                                              target_comp[j,]$RT2,
-                                             summary(as.numeric(temp[idx2,]$RT1))[[1]],
-                                             summary(as.numeric(temp[idx2,]$RT1))[[2]],
-                                             summary(as.numeric(temp[idx2,]$RT1))[[3]],
-                                             summary(as.numeric(temp[idx2,]$RT1))[[4]],
-                                             summary(as.numeric(temp[idx2,]$RT1))[[5]],
-                                             summary(as.numeric(temp[idx2,]$RT1))[[6]])
+                                             summary(as.numeric(temp[idx2,]$RT2))[[1]],
+                                             summary(as.numeric(temp[idx2,]$RT2))[[2]],
+                                             summary(as.numeric(temp[idx2,]$RT2))[[3]],
+                                             summary(as.numeric(temp[idx2,]$RT2))[[4]],
+                                             summary(as.numeric(temp[idx2,]$RT2))[[5]],
+                                             summary(as.numeric(temp[idx2,]$RT2))[[6]])
       # Make histogram of distribution of RT of these target compound
       # par(mfrow = c(1, 2))
       # hist(as.numeric(temp[idx2,]$RT1),
@@ -420,8 +424,11 @@ for (j in 1:nrow(target_comp)) {
     }
 }
 
+View(summary_df)
+
 writexl::write_xlsx(summary_df, path = paste0(getwd(), "/summary of target compounds matching by major and minor ions and rt1_rt2 of (0.1).xlsx"))
 ```
+
 
 # Make a table for the compounds that was not found in all samples, give the names of the samples where these target compounds are missing
 ***If the compound can be found in all samples then plot it with x-axis as 71 samples sorted from gas_station 1 to 10, the legend is the sampling season***
@@ -524,11 +531,83 @@ writexl::write_xlsx(summary_df2, path = paste0(getwd(), "/Samples where target c
 # STEP 2: Grouping compounds based on RT1, RT2, Ion1, Ion2
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-alignment <- grouping_comp_ver1(df_step2,
-                             rt1thres = 0.4,
-                             rt2thres = 0.16,
-                             ion1thres = 0.05, # Ion 1 and 2 indicates molecular structure (2 most prevalent mass-to-charge)
-                             ion2thres = 0.05)
+# Define tolerances
+tolerances <- list(RT1 = 0.1, RT2 = 0.1, Ion1 = 0.5, Ion2 = 0.5)
+
+# Read the first sheet
+df_all <- df_step2 %>% 
+  filter(Sample_name %in% "pF001A") %>% 
+  filter(`Signal to Noise` > 25) # read_excel(excel_file, sheet = sheet_names[1]) %>% filter(`Signal to Noise` > 25)
+df_all$Feature <- 1:nrow(df_all)
+
+# Loop through the remaining sheets
+for (sample in setdiff(unique(df_step2$Sample_name), "pF001A")) {
+  print(sample)
+  df <- df_step2 %>% 
+    filter(Sample_name %in% sample) %>% 
+    filter(`Signal to Noise` > 25) # read_excel(excel_file, sheet = sheet) %>% filter(`Signal to Noise` > 25)
+  df$Feature <- NA
+  
+  # Go through each row
+  for (i in 1:nrow(df)) {
+    row <- df[i, ]
+    mask <- (
+      abs(df_all$RT1 - row$RT1) <= tolerances$RT1 & #abs(df_all$RT1 + row$RT1) <= tolerances$RT1 &
+      abs(df_all$RT2 - row$RT2) <= tolerances$RT2 & #abs(df_all$RT2 + row$RT2) <= tolerances$RT2 &
+      abs(df_all$Ion1 - row$Ion1) <= tolerances$Ion1 & #abs(df_all$Ion1 + row$Ion1) <= tolerances$Ion1 &
+      abs(df_all$Ion2 - row$Ion2) <= tolerances$Ion2 #& abs(df_all$Ion2 + row$Ion2) <= tolerances$Ion2
+    )
+    
+    idx <- which(mask)
+    if (any(mask)) {
+      row$Feature <- unique(df_all[idx, ]$Feature)[1]
+    } else {
+      row$Feature <- max(df_all$Feature) + 1
+    }
+    
+    # adding the peak that have matchs in df_all
+    df_all <- bind_rows(df_all, row)
+  }
+}
+
+# Output the combined data frame
+View(df_all)
+
+# Create metadata for next data analysis
+metadata <- df_all %>%
+  dplyr::select(
+    Feature,
+    Sample_name,
+    Area) %>%
+  group_by(Feature,
+           Sample_name) %>%
+  dplyr::summarise(across(Area, base::mean)) %>%
+  tidyr::pivot_wider(names_from = Sample_name,
+                     values_from = Area) 
+
+# Adding avg RT and Ions to the master df
+mean_rt1 <- c()
+mean_rt2 <- c()
+mean_ion1 <- c()
+mean_ion2 <- c()
+
+for (i in 1:nrow(metadata)) {
+  mean_rt1 <- c(mean_rt1, mean(df_all[which(df_all$Feature  %in% metadata[i, ]$Feature),]$RT1))
+  mean_rt2 <- c(mean_rt2, mean(df_all[which(df_all$Feature  %in% metadata[i, ]$Feature),]$RT2))
+  mean_ion1 <- c(mean_ion1, mean(df_all[which(df_all$Feature  %in% metadata[i, ]$Feature),]$Ion1))
+  mean_ion2 <- c(mean_ion2, mean(df_all[which(df_all$Feature  %in% metadata[i, ]$Feature),]$Ion2))
+}
+
+metadata$RT1 <- mean_rt1
+metadata$RT2 <- mean_rt2
+metadata$Ion1 <- mean_ion1
+metadata$Ion2 <- mean_ion2
+
+metadata <- metadata %>% relocate(RT1, RT2,Ion1, Ion2, .after = 1)
+
+# Export masterlist and metadata for Gwen
+# writexl::write_xlsx(df_all, path = paste0("MasterList_", format(Sys.Date(), format = "%d-%b-%Y"), ".xlsx"))
+# writexl::write_xlsx(metadata, path = paste0("PeakTable_", format(Sys.Date(), format = "%d-%b-%Y"), ".xlsx"))
 ```
 
 (Update 22nd May 2024:) The alignment is based on pF001A, align all peaks in data set with each peak of pF001A.
@@ -562,6 +641,7 @@ filter_alignment <- comp_filter(test)
 shared_comp_alignment <- test[filter_alignment[[1]],]
 ```
 
+
 # Overlay Scatter plot as Visual confirmation of appropriate RT windows by checking overlapping of RT1 and RT2 of aligned compounds and target compounds
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 plotlist <- list()
@@ -587,6 +667,7 @@ plotly::ggplotly(ggplot() +
                               aes(x=RT1, y= RT2, label = Compound)) + 
                    xlim(5, 40))
 ```
+
 
 # STEP 3: Identify shared and unique compound groups across samples
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
