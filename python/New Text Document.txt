@@ -1,6 +1,0 @@
-what are the 3 things that people take away from your pitch
-change PCA figure axis to PC1 and PC2 instead of Dim1 and Dim2
-Rename Ziploc plastic bads -> plastic bags with locking zip mechanism
-spacing between 
-fix the line width between textboxes of Figure1 and table in Result
-QR code to a linktree website that includes email, github repo, linkedin, etc.
