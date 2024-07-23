@@ -50,9 +50,9 @@ library(latticeExtra)
 library(cluster)
 library(umap)
 library(plotly)
-library(NADA2)
-library(EnvStats)
-library(CensSpatial)
+# library(NADA2)
+# library(EnvStats)
+# library(CensSpatial)
 library(mice)
 
 # Functions -------------------------------------------------------------------------------------------------------
@@ -622,6 +622,22 @@ if (!is.null(less_na)) {
 }
 ```
 
+### Subset compound that only appear in 1 gas station
+```{r class.source = 'fold-hide', echo = FALSE, message = FALSE, warning = FALSE}
+unique_comp <- c()
+
+for (feature in unique(df_all$Feature)) {
+  if (length(unique(df_all[which(df_all$Feature == feature),]$Sample_name)) < 2) {
+    unique_comp <- c(unique_comp, feature)
+  }
+}
+
+# A). dataset with non-unique compounds
+new_df <- metadata %>% filter(Feature %notin% unique_comp)
+
+# B). dataset with only unique compounds
+unique_df <- metadata %>% filter(Feature %in% unique_comp)
+```
 
 ## Investigate data distribution of compounds with high mean and high/low std
 
@@ -630,13 +646,15 @@ if (!is.null(less_na)) {
 # hist((shared_comp_alignment %>%
 #   filter(Area < 10000000))$Area)
 
-summary_table <- metadata_na_remove %>% 
+summary_table <- new_df %>% # metadata_na_remove %>% 
   ungroup() %>%
   rowwise() %>%
   mutate(mean_area = mean(c_across(7:ncol(.)), na.rm = TRUE),
          sd_area = sd(c_across(7:ncol(.)), na.rm = TRUE)) %>%
   ungroup() %>% 
   relocate(mean_area, sd_area, .before = 1)
+
+View(summary_table %>% arrange(desc(mean_area), desc(sd_area)))
 
 highmean_highstd <- list()
 i <- 1
@@ -683,56 +701,6 @@ for (num_feature in c(25,50,100,200)) {
 #   ggtitle("Rank 1:100") +
 #   theme_classic(base_size = 15) +
 #   theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
-```
-
-### Subset compound that only appear in 1 gas_station/Octane_rating/supplier/sampling_season
-Non-unique gas_station: 35 compounds
-Non-unique Octane_rating: 47 compounds
-Non-unique supplier: 52 compounds
-Non-unique sampling_season: 56 compounds => Some compounds only have 4 obs (2 for each of the 2 product_name)
-
-```{r class.source = 'fold-hide', echo = FALSE, message = FALSE, warning = FALSE}
-unique_comp <- c()
-
-transform_df2 <- df_step3 %>%
-  pivot_longer(cols = 6:ncol(.), names_to = "Feature", values_to = "PA")
-
-for (feature in unique(transform_df2$Feature)) {
-  if (length(unique(transform_df2[which(transform_df2$Feature == feature & !is.na(transform_df2$PA)),]$gas_station)) < 2) {
-    unique_comp <- c(unique_comp, feature)
-  }
-}
-
-# A). dataset with non-unique compounds
-new_df <- df_step3 %>% select(-unique_comp)
-
-# B). dataset with only unique compounds
-unique_df <- cbind(df_step3[, c(1,2,3,4,5)], df_step3 %>% select(unique_comp))
-```
-
-
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
-## SELECT TOP 100 COMPOUNDS THAT HAVE HIGHEST CUMULATIVE PEAK AREA ACROSS ALL SAMPLES ---------------
-# Compute the sum of values of each column
-column_sums <- colMeans(df_step3[,4:ncol(df_step3)])
-
-# Order the columns based on their sum values
-# Select the top 100 columns with the highest sum value
-top_100_cum_sum <- names(column_sums)[order(column_sums, decreasing = TRUE)[1:100]]
-
-# Create a new dataframe with only the top 100 columns
-df_step3 <- df_step3[, c("Octane_rating", "samp_event", "gas_station", top_100_cum_sum)]
-
-## SELECT TOP 150 COMPOUNDS THAT HAVE HIGHEST Variance of ACROSS ALL SAMPLES ------------
-# Compute variance of values for each column
-variances <- apply(df_step3[,3:ncol(df_step3)], 2, var)
-
-# Sort variances in descending order and get the indices of the top 100 columns
-top_100_var <- order(variances, decreasing = TRUE)[1:100]
-
-# Select the top 100 columns with highest variance values
-df_step3 <- df_step3[, c(1, 2, top_100_var)]
-
 ```
 
 # STEP 4: Missing value imputation
@@ -977,6 +945,153 @@ x <- textGrob("Samples", gp = gpar(fontsize = 20))
 grid.arrange(grobs = plot_list, ncol = 4, right = legend, left = y, bottom = x)
 ```
 
+
+# Feature selection
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+library(MASS)  # For mvrnorm
+library(stats)  # For ANOVA
+
+# Function to generate confidence ellipses
+confidence_ellipse <- function(mean, cov, conf.level = 0.95) {
+  radius <- sqrt(qchisq(conf.level, df = 2))
+  eigen_decomp <- eigen(cov)
+  angle <- atan2(eigen_decomp$vectors[2, 1], eigen_decomp$vectors[1, 1])
+  a <- radius * sqrt(eigen_decomp$values[1])
+  b <- radius * sqrt(eigen_decomp$values[2])
+  list(mean = mean, angle = angle, a = a, b = b)
+}
+
+# Function to determine overlap of two ellipses
+ellipses_overlap <- function(ellipse1, ellipse2) {
+  # Calculate the Euclidean distance between the centers of the ellipses
+  distance <- sqrt(sum((ellipse1$mean - ellipse2$mean)^2))
+  critical_distance <- ellipse1$a + ellipse2$a
+  return(distance < critical_distance)
+}
+
+# Function to calculate cluster resolution
+calculate_cluster_resolution <- function(data1, data2, initial_conf = 0.75) {
+  conf.level <- initial_conf
+  overlap <- TRUE
+  
+  while (overlap) {
+    if (conf.level <= 0 || conf.level >= 1) {
+      break
+    }
+    ellipse1 <- confidence_ellipse(colMeans(data1), cov(data1), conf.level)
+    ellipse2 <- confidence_ellipse(colMeans(data2), cov(data2), conf.level)
+    overlap <- ellipses_overlap(ellipse1, ellipse2)
+    if (is.na(overlap)) {
+      break
+    }
+    if (overlap) {
+      conf.level <- conf.level - 0.01
+    } else {
+      conf.level <- conf.level + 0.01
+    }
+  }
+  
+  return(conf.level)
+}
+
+# Function to perform ANOVA and rank variables
+rank_variables_anova <- function(data, group) {
+  anova_results <- apply(data, 2, function(x) anova(lm(x ~ group))$`Pr(>F)`[1])
+  ranked_vars <- order(anova_results)
+  return(ranked_vars)
+}
+
+# With rank variables from highest to lowest of their calculated mean and std., variables here already occur in >1 sample
+rank_variables_high_mean_std <- function(data) {
+  temp1 <- data[, -c(1,2,3,5)] %>% column_to_rownames(., var="Sample_name")
+  temp2 <- t(temp1)
+  colnames(temp2) <- rownames(temp1)
+  rownames(temp2) <- colnames(temp1)
+  return(as.numeric((as.data.frame(temp2) %>% 
+                       rownames_to_column(., var = "Feature") %>%
+                       ungroup() %>%
+                       rowwise() %>%
+                       mutate(mean_area = mean(c_across(2:ncol(.)), na.rm = TRUE),
+                              sd_area = sd(c_across(2:ncol(.)), na.rm = TRUE)) %>%
+                       ungroup() %>% 
+                       relocate(mean_area, sd_area, .before = 1) %>%
+                       arrange(desc(mean_area), desc(sd_area)))$Feature))
+         
+}
+
+# Function to perform PCA and calculate cluster resolution for multiple groups
+variable_selection <- function(data, group, max_vars = 10) {
+  # ranked_vars <- rank_variables_anova(data, group)
+  ranked_vars <-  rank_variables_high_mean_std(data)
+  selected_vars <- c()
+  max_resolution <- 0
+  resolutions <- c()
+  
+  for (i in 1:max_vars) {
+    selected_vars <- c(selected_vars, ranked_vars[i])
+    if (length(selected_vars) >= 2) {  # Ensure at least two variables are selected
+      pca_model <- prcomp(data[, as.character(selected_vars)], center = TRUE, scale. = TRUE)
+      scores <- pca_model$x
+      
+      group_levels <- levels(group)
+      pair_resolutions <- c()
+      
+      # Calculate cluster resolution for each pair of groups
+      for (g1 in 1:(length(group_levels) - 1)) {
+        for (g2 in (g1 + 1):length(group_levels)) {
+          data1 <- scores[group == group_levels[g1], 1:2]
+          data2 <- scores[group == group_levels[g2], 1:2]
+          resolution <- calculate_cluster_resolution(data1, data2)
+          pair_resolutions <- c(pair_resolutions, resolution)
+        }
+      }
+      
+      avg_resolution <- mean(pair_resolutions, na.rm = TRUE)
+      resolutions <- c(resolutions, avg_resolution)
+    }
+  }
+  
+  return(list(selected_vars = selected_vars, resolutions = resolutions))
+}
+
+# ----------------------------------------------------------------------------------------------
+input1 <- percentage_normalized_all # %>% filter(supplier %notin% c("Miscellanous", "unknown"))
+input2 <- input1[, 6:ncol(input1)]
+group <- factor(input1$gas_station)
+
+# Perform variable selection
+max_vars <- ncol(input2)
+result <- variable_selection(input2, group, max_vars = max_vars)
+print(result)
+
+# ----------------------------------------------------------------------------------------------
+# Plot resolutions against number of variables
+resolutions_df <- data.frame(
+  num_vars = seq_along(result$resolutions),
+  resolution = result$resolutions
+)
+
+ggplot(resolutions_df, aes(x = num_vars, y = resolution)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Impact of Each Variable on Cluster Resolution",
+       x = "Number of Variables Added",
+       y = "Cluster Resolution") +
+  theme_classic(base_size = 18) +
+  scale_x_continuous(limits = c(1, max_vars), breaks = seq(from = 0, to = max_vars, by = 25)) +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(from = 0, 
+                                                    to = 1, 
+                                                    by = 0.1)) +
+  theme(plot.title = element_text(hjust = 0.5),
+        # axis.text.x = element_text(angle = 90),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_blank()
+  )
+``` 
+
+
 # Multiple Welch t-tests with p-value correction for multiple testing
 
 ```{r, echo = TRUE, message = FALSE, warning = FALSE}
@@ -1033,8 +1148,8 @@ outlierTest(lm(differences ~ 1))
 ###  Welch t-tests 
 (Update 9th July 2024): Welch t-test is more appropriate than Wilcoxon test. 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-input <- log_normalized[[1]] %>%
-  # filter(supplier %notin% c("misc", "unknown")) %>%
+input <- percentage_normalized[[4]] %>%
+  filter(supplier %notin% c("Miscellanous", "unknown")) %>%
   column_to_rownames(., var = "Sample_name")
 
 sig_comp <- list()
@@ -1163,11 +1278,11 @@ pca_input <- percentage_normalized[[4]] %>%
   column_to_rownames(., var = "Sample_name")
 
 colnames(pca_input) <- c("gas_station", unlist(name_list))
-
+------------------------------------------------------------------------------------------------------------------
 plot_list <- list()
-for (i in 1:length(log_normalized)) {
+for (i in 1:length(percentage_normalized)) {
   pca_input <-
-    log_normalized[[i]]
+    percentage_normalized[[i]] %>% filter(supplier %notin% c("Miscellanous", "unknown"))
   
   res.pca <- FactoMineR::PCA(
     pca_input[, 6:ncol(pca_input)],
@@ -1180,22 +1295,22 @@ for (i in 1:length(log_normalized)) {
   # Biplot
   plot_list[[i]] <- factoextra::fviz_pca_biplot(res.pca,  
                                                 geom = "text",
-                                                label = "all",
+                                                label = "ind",
                                                 repel = TRUE,
                                                 labelsize = 5, 
                                                 habillage = factor(pca_input$gas_station), # "sampling_season", "Octane_rating", "gas_station", "Sample_name", "supplier"
                                                 # palette = "ucscgb",
-                                                # addEllipses = TRUE,
-                                                # ellipse.level = 0.95,
+                                                addEllipses = TRUE,
+                                                ellipse.level = 0.95,
                                                 # xlim = c(-0.2, 0.2),
                                                 # ylim = c(-0.009, 0.009),
                                                 ggtheme = ggplot2::theme_minimal(base_size = 20),
                                                 title = paste0("Top ", ncol(pca_input[, 6:ncol(pca_input)]), " features")
   ) + 
     # if has error "Too few points to calculate an ellipse"
-    ggforce::geom_mark_ellipse(aes(fill = Groups,
-                                   color = Groups),
-                               label.buffer = unit(20, 'mm')) +
+    # ggforce::geom_mark_ellipse(aes(fill = Groups,
+    #                                color = Groups),
+    #                            label.buffer = unit(20, 'mm')) +
     theme(legend.position = 'bottom',
           panel.spacing = unit(0, "lines"))
 }
@@ -1603,4 +1718,28 @@ Residuals   61 3.155e-29 5.171e-31
 summary(aov(as.formula(paste(paste(setdiff(names(comp_normalized_rt10.1 %>%
                                              select(-c("Octane_rating", "sampling_season"))), "gas_station"), collapse = "+"), " ~ gas_station")), data = comp_normalized_rt10.1 %>%
                                              select(-c("Octane_rating", "sampling_season"))))
+```
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+## SELECT TOP 100 COMPOUNDS THAT HAVE HIGHEST CUMULATIVE PEAK AREA ACROSS ALL SAMPLES ---------------
+# Compute the sum of values of each column
+column_sums <- colMeans(df_step3[,4:ncol(df_step3)])
+
+# Order the columns based on their sum values
+# Select the top 100 columns with the highest sum value
+top_100_cum_sum <- names(column_sums)[order(column_sums, decreasing = TRUE)[1:100]]
+
+# Create a new dataframe with only the top 100 columns
+df_step3 <- df_step3[, c("Octane_rating", "samp_event", "gas_station", top_100_cum_sum)]
+
+## SELECT TOP 150 COMPOUNDS THAT HAVE HIGHEST Variance of ACROSS ALL SAMPLES ------------
+# Compute variance of values for each column
+variances <- apply(df_step3[,3:ncol(df_step3)], 2, var)
+
+# Sort variances in descending order and get the indices of the top 100 columns
+top_100_var <- order(variances, decreasing = TRUE)[1:100]
+
+# Select the top 100 columns with highest variance values
+df_step3 <- df_step3[, c(1, 2, top_100_var)]
+
 ```
