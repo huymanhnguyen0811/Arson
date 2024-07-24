@@ -72,7 +72,7 @@ dfs <- excel_sheets(file_path) %>%
   map(~ read_excel(file_path, sheet = .x) %>% mutate(Sample_name = .x))
 
 df_step1.1 <- bind_rows(dfs) %>%
-  select(-c("RMF", "Area %")) %>%
+  dplyr::select(-c("RMF", "Area %")) %>%
   mutate(Octane_rating = ifelse(str_detect(Sample_name, "A"), "Gas_87", 
                                 ifelse(str_detect(Sample_name, "B"), "Gas_89",
                                        ifelse(str_detect(Sample_name, "C"), "Gas_91", "Gas_94")))) %>%
@@ -109,8 +109,8 @@ filter_list <- c("^Carbon disulfide$",
 
 # ^Carbon disulfide$ 75.890 - 75.959, 77.881 - 77.948
 
-df_step1.2 <- copy(df_step1.1) %>%
-  filter(MF > 0)
+df_step1.2 <- copy(df_step1.1) # %>%
+  # filter(MF > 0)
 
 for (filter_comp in filter_list) {
   df_step1.2 <- df_step1.2 %>%
@@ -1198,11 +1198,11 @@ chem_grp <- c()
 compound_name <- c()
 for (row in 1:nrow(sig_comp[[1]])) {
   # print(row)
-  rt1 <- c(rt1, metadata_na_remove[which(metadata_na_remove$Feature == as.numeric(sig_comp[[1]][row,]$Feature)),]$RT1)
-  rt2 <- c(rt2,metadata_na_remove[which(metadata_na_remove$Feature == as.numeric(sig_comp[[1]][row,]$Feature)),]$RT2)
-  major <- c(major, metadata_na_remove[which(metadata_na_remove$Feature == as.numeric(sig_comp[[1]][row,]$Feature)),]$Ion1)
-  minor <- c(minor, metadata_na_remove[which(metadata_na_remove$Feature == as.numeric(sig_comp[[1]][row,]$Feature)),]$Ion2)
-  chem_grp <- c(chem_grp, metadata_na_remove[which(metadata_na_remove$Feature == as.numeric(sig_comp[[1]][row,]$Feature)),]$Chemical_group)
+  rt1 <- c(rt1, new_df[which(new_df$Feature == as.numeric(sig_comp[[1]][row,]$Feature)),]$RT1)
+  rt2 <- c(rt2,new_df[which(new_df$Feature == as.numeric(sig_comp[[1]][row,]$Feature)),]$RT2)
+  major <- c(major, new_df[which(new_df$Feature == as.numeric(sig_comp[[1]][row,]$Feature)),]$Ion1)
+  minor <- c(minor, new_df[which(new_df$Feature == as.numeric(sig_comp[[1]][row,]$Feature)),]$Ion2)
+  chem_grp <- c(chem_grp, new_df[which(new_df$Feature == as.numeric(sig_comp[[1]][row,]$Feature)),]$Chemical_group)
 }
 
 sig_comp[[1]]$RT1 <- rt1
