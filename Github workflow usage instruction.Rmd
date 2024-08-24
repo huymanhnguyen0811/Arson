@@ -64,7 +64,7 @@ library(mice)
 # STEP 1.1: Data import
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 target_comp <- read_xlsx(path = "Shortened ILR Compound List PF001A 07-06-2024.xlsx")
-ASTM <- read_xlsx(path = "ILR Compound List 05-15-2024_Without DieselASTM.xlsx")
+# ASTM <- read_xlsx(path = "ILR Compound List 05-15-2024_Without DieselASTM.xlsx")
 file_path <- "Gasolines_BOP_110424.xlsx"
 
 dfs <- excel_sheets(file_path) %>%
@@ -242,8 +242,6 @@ For the reporting table, there will be cases where the target compounds might no
 Then, I pick the combination of Rt1 and Rt2 that results in the highest cumulative sum of the **"Proportion"** from all target compound by using **rowSums**.
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-target_comp <- readxl::read_xlsx(path = paste0(getwd(), "/Supplementary Materials.xlsx"), sheet = "List of target compounds")# "/Shortened ILR Compound List PF001A Fixed.xlsx"))
-
 # For each target compounds,  Apply different alignment windows and record number of samples that have the =target compounds
 combi <- tidyr::crossing(
   # RT1
@@ -315,8 +313,6 @@ writexl::write_xlsx(summary_df, path = paste0(getwd(), "/Testing combinations of
 # QUALITY CONTROL: Examine the distribution of RT of target compounds after alignment with pF001A
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-target_comp <- read_xlsx("Shortened ILR Compound List PF001A 07-06-2024.xlsx")
-
 # Get the column names from the existing data frame
 column_names <- c( "Target compound", "RT", "Retention time of pF001A", "Min.", "1st Qu.", "Median",  "Mean", "3rd Qu.", "Max.", "Max. RT - Min. RT")
 # Create an empty data frame with the same column names
@@ -554,7 +550,7 @@ mean_ion1 <- c()
 mean_ion2 <- c()
 
 for (i in 1:nrow(metadata)) {
-  mean_rt1 <- c(mean_rt1, mean(df_all[which(df_all$Feature  %in% metadata[i, ]$Feature),]$RT1))
+  mean_rt1 <- c(mean_rt1, mean(df_all[which(df_all$Feature %in% metadata[i, ]$Feature),]$RT1))
   mean_rt2 <- c(mean_rt2, mean(df_all[which(df_all$Feature  %in% metadata[i, ]$Feature),]$RT2))
   mean_ion1 <- c(mean_ion1, mean(df_all[which(df_all$Feature  %in% metadata[i, ]$Feature),]$Ion1))
   mean_ion2 <- c(mean_ion2, mean(df_all[which(df_all$Feature  %in% metadata[i, ]$Feature),]$Ion2))
@@ -572,7 +568,9 @@ chemical_group <- c()
 
 for (i in 1:nrow(metadata)) {
   idx <- which(abs(metadata[i,]$Ion1 -target_comp$Ion1) <=  0.5 & 
-                 abs(metadata[i,]$Ion2 -target_comp$Ion2) <=  0.5 )
+                 abs(metadata[i,]$Ion2 -target_comp$Ion2) <=  0.5 &
+                 abs(metadata[i,]$RT1 -target_comp$RT1) <=  0.1 &
+                 abs(metadata[i,]$RT2 -target_comp$RT2) <=  0.1)
   if (identical(idx, integer(0))) {
     chemical_group <- c(chemical_group, "unknown")
     next
@@ -592,36 +590,6 @@ metadata <- metadata %>% relocate(Chemical_group, .after = 1)
 
 (Update 22nd May 2024:) The alignment is based on pF001A, align all peaks in data set with each peak of pF001A.
 
-### (Update 20th June 2024): SELECT COMPOUNDS THAT belongs to the target compound’s Chemical Group ----------------
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
-metadata <- metadata %>% 
-  # filter(., Chemical_group %notin% "unknown") %>%
-  arrange(Chemical_group, RT1, RT2)
-```
-
-### Combine data from chemical groups
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
-# new_metadata <- metadata %>%
-#   group_by(Chemical_group) %>%
-#   summarize(across(everything(), sum, na.rm = TRUE))
-```
-
-
-### REMOVE COMPOUNDS THAT HAVE < x% MISSING VALUES ----------------
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
-less_na <- c()
-for (row in 1:nrow(metadata)) {
-  # Filter our compounds that have more than x % NA values
-  if (sum(is.na(metadata[row,7:ncol(metadata)]))/dim(metadata[,7:ncol(metadata)])[2] <= 0.9) {
-    less_na <- c(less_na, row)
-  }
-}
-
-if (!is.null(less_na)) {
-  metadata_na_remove <- metadata[less_na,]
-}
-```
-
 ### Subset compound that only appear in 1 gas station
 ```{r class.source = 'fold-hide', echo = FALSE, message = FALSE, warning = FALSE}
 unique_comp <- c()
@@ -639,7 +607,40 @@ new_df <- metadata %>% filter(Feature %notin% unique_comp)
 unique_df <- metadata %>% filter(Feature %in% unique_comp)
 ```
 
-## Investigate data distribution of compounds with high mean and high/low std
+# STEP 3: Feature elimination/ Feature prioritization
+
+### (Update 20th June 2024): SELECT COMPOUNDS THAT belongs to the target compound’s Chemical Group ----------------
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+metadata <- metadata %>% 
+  # filter(., Chemical_group %notin% "unknown") %>%
+  arrange(Chemical_group, RT1, RT2)
+```
+
+### Combine data from chemical groups
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+# new_metadata <- metadata %>%
+#   group_by(Chemical_group) %>%
+#   summarize(across(everything(), sum, na.rm = TRUE))
+```
+
+
+### 1. Via REMOVE COMPOUNDS THAT HAVE < x% MISSING VALUES ----------------
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+less_na <- c()
+for (row in 1:nrow(metadata)) {
+  # Filter our compounds that have more than x % NA values
+  if (sum(is.na(metadata[row,7:ncol(metadata)]))/dim(metadata[,7:ncol(metadata)])[2] <= 0.9) {
+    less_na <- c(less_na, row)
+  }
+}
+
+if (!is.null(less_na)) {
+  metadata_na_remove <- metadata[less_na,]
+}
+```
+
+
+### 2. Via Investigate data distribution of compounds with high mean and high/low std
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 # Investigate data distribution for removal of compounds with high mean and low variance
@@ -654,7 +655,7 @@ summary_table <- new_df %>% # metadata_na_remove %>%
   ungroup() %>% 
   relocate(mean_area, sd_area, .before = 1)
 
-View(summary_table %>% arrange(desc(mean_area), desc(sd_area)))
+# View(summary_table %>% arrange(desc(mean_area), desc(sd_area)))
 
 highmean_highstd <- list()
 i <- 1
@@ -662,7 +663,7 @@ for (num_feature in c(25,50,100,200)) {
   # Adding back the labelling to metadata
   highmean_highstd[[i]] <- as.data.frame(t((summary_table %>% arrange(desc(mean_area), desc(sd_area)))[1:num_feature,] %>%  #
                                 # filter(Feature %in% unique(highmean_highstd$Feature)) %>% # Select compounds with high peak area's mean and std.
-                                select(-c("Chemical_group", "RT1", 
+                                dplyr::select(-c("Chemical_group", "RT1", 
                                           "RT2", "Ion1", "Ion2", "mean_area", "sd_area")) %>% 
                                 column_to_rownames(., var = "Feature"))) %>% 
     rownames_to_column(., var="Sample_name") %>% 
@@ -702,6 +703,8 @@ for (num_feature in c(25,50,100,200)) {
 #   theme_classic(base_size = 15) +
 #   theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
 ```
+
+ 
 
 # STEP 4: Missing value imputation
 (Update 21 April 2024:) After remove compounds appear in only one sample and compounds that have >90% Missing values -> plot histogram of distribution -> most of compounds are < 2e+06 => try filter all peaks that is >= 2e+06
@@ -769,7 +772,7 @@ for (i in 1:length(mice_df)) {
 ```
 
 
-# STEP 4: Data Normalization
+# STEP 5: Data Normalization
 
 ### Percentage-based normalization
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
@@ -812,6 +815,97 @@ for (i in 1:length(input)) {
 
 
 # Exploratory Data Analysis
+## Stacked bar plot of significant compounds and associated suppliers
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+df <- p_test %>%
+  pivot_longer(cols = 6:ncol(.), names_to = "Feature", values_to = "Area") %>%
+  filter(Feature %in% unique(c(unique(sig_comp[[1]]$Feature), unique(sig_comp[[2]]$Feature), unique(sig_comp[[3]]$Feature), unique(sig_comp[[4]]$Feature), unique(sig_comp[[5]]$Feature))))
+
+rt1 <- c()
+rt2 <- c()
+major <- c()
+minor <- c()
+chem_grp <- c()
+compound_name <- c()
+for (row in 1:nrow(df)) {
+  rt1 <- c(rt1, new_df[which(new_df$Feature == as.numeric(df[row,]$Feature)),]$RT1)
+  rt2 <- c(rt2,new_df[which(new_df$Feature == as.numeric(df[row,]$Feature)),]$RT2)
+  major <- c(major, new_df[which(new_df$Feature == as.numeric(df[row,]$Feature)),]$Ion1)
+  minor <- c(minor, new_df[which(new_df$Feature == as.numeric(df[row,]$Feature)),]$Ion2)
+  chem_grp <- c(chem_grp, new_df[which(new_df$Feature == as.numeric(df[row,]$Feature)),]$Chemical_group)
+}
+
+df$RT1 <- rt1
+df$RT2 <- rt2
+df$Ion1 <- major
+df$Ion2 <- minor
+df$Chemical_group <- chem_grp
+
+## Get compound name 
+compound_name <- c()
+for (row in 1:nrow(df)) {
+  idx <- which(abs(target_comp$RT1 - df[row,]$RT1) <= 0.1 &
+                 abs(target_comp$RT2 - df[row,]$RT2) <= 0.1 &
+                 abs(target_comp$Ion1 - df[row,]$Ion1) <= 0.5 &
+                 abs(target_comp$Ion2 - df[row,]$Ion2) <= 0.5)
+  # print(paste0(row, "_", idx))
+  if (identical(idx, integer(0))) {
+    compound_name <- c(compound_name, "unknown")
+  }
+  compound_name <- c(compound_name, target_comp[idx,]$Compound)
+}
+
+df$compound_name <- compound_name
+df$Sample_name <- factor(df$Sample_name, levels = sort(unique(df$Sample_name)))
+plotdf <- df %>% 
+  filter(gas_station %in% c("Station 3", "Station 4", "Station 6", "Station 7")) %>%
+  filter(compound_name %notin% "unknown")
+
+plot_list <- list()
+i <- 1
+for (focus_supplier in unique(plotdf$supplier)) {
+    plot_df <- plotdf %>%
+        filter(supplier %in% focus_supplier)
+    
+    plot_list[[i]] <- ggplot(data = plot_df, aes(x = Sample_name, y = Area, fill = compound_name)) +
+        geom_bar(stat = "identity") +
+        labs(title = focus_supplier,
+             x = "", 
+             y = "") +
+        theme_minimal(base_size = 18) +
+        theme(axis.text.x = element_text(angle = 90, hjust =0.5, vjust = 0.25,
+                                         # size = 18,
+                                         face = "bold"), 
+              axis.ticks.length.x = unit(0, "cm"),
+              # legend.text = element_text(size = 18),
+              # legend.title = element_text(size = 18),
+              # axis.title.y = element_text(size = 15),
+              legend.position = "hidden",
+              plot.title = element_text(hjust = 0.5),
+              panel.grid.minor.x = element_blank(),
+              panel.grid.minor.y = element_blank(),
+              panel.grid.major.x = element_blank(),
+              panel.grid.major.y = element_blank()
+        ) + 
+        scale_y_continuous(expand = c(0,0), limits = c(0, 0.5))
+    i <- i + 1
+}
+
+legend <- cowplot::get_legend(ggplot(data = plot_df, aes(x = Sample_name, y = Area, fill = compound_name)) +
+                                  geom_bar(stat = "identity") +
+                                  facet_wrap(~supplier) +
+                                  labs(fill = "Chemical Groups") +
+                                  theme_minimal(base_size = 20) +
+                                  theme(legend.text = element_text(size = 18),
+                                        legend.title = element_text(size = 20),
+                                        axis.title.y = element_text(size = 20),
+                                        legend.position = "right"))
+
+y <- textGrob("Peak Area", rot = 90, gp = gpar(fontsize = 20))
+x <- textGrob("Samples", gp = gpar(fontsize = 20))
+
+grid.arrange(grobs = plot_list, ncol = 2, nrow = 2, right = legend, left = y, bottom = x)
+```
 
 # Stacked bar plot of each suppliers
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
@@ -832,7 +926,6 @@ df <- df %>%
   filter(gas_station %in% c("Station 3", "Station 4", "Station 6", "Station 7")) %>%
   filter(supplier %notin% "unknown") %>% 
   filter(Chemical_group %notin% "unknown")
-
 
 
 plot_list <- list()
@@ -861,7 +954,7 @@ for (focus_supplier in unique(df$supplier)) {
           panel.grid.major.x = element_blank(),
           panel.grid.major.y = element_blank()
           ) + 
-    scale_y_continuous(expand = c(0,0))
+    scale_y_continuous(expand = c(0,0), limits = c(0, max(df$Area)))
   i <- i + 1
 }
 
@@ -946,7 +1039,392 @@ grid.arrange(grobs = plot_list, ncol = 4, right = legend, left = y, bottom = x)
 ```
 
 
-# Feature selection
+
+
+
+# Multiple Welch t-tests with p-value correction for multiple testing
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+# Histogram
+hist(as.numeric(unlist(input[which(input$supplier == "Shell"), 13])), col='steelblue', main='')
+hist(as.numeric(unlist(input[which(input$supplier == "Cenovus"), 13])), col='steelblue', main='')
+
+# Q-Q plots aka. Normal Probability plots
+stats::qqnorm(as.numeric(unlist(input[which(input$supplier == "Shell"), 13])), main='')
+stats::qqline(as.numeric(unlist(input[which(input$supplier == "Shell"), 13])))
+
+stats::qqnorm(as.numeric(unlist(input[which(input$supplier == "Cenovus"), 13])), main='')
+stats::qqline(as.numeric(unlist(input[which(input$supplier == "Cenovus"), 13])))
+```
+
+### Levene’s test-non-normally distributed data & Fligner-Killeen test
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+library(car)
+# Here is an example case of a significant compound taken from  Welch's t-test(for unequal variances) of suppliers
+data <- data.frame(group = factor(c(rep("group1", 
+                                        length(as.numeric(unlist(input[which(input$gas_station == "Station_3"), 13])))), 
+                                    rep("group2", 
+                                        length(as.numeric(unlist(input[which(input$gas_station == "Station_10"), 13])))))),
+                   values = c(as.numeric(unlist(input[which(input$gas_station == "Station_3"), 13])), 
+                              as.numeric(unlist(input[which(input$gas_station == "Station_10"), 13]))))
+                   
+# Separate the groups
+group1 <- data$values[data$group == "group1"]
+group2 <- data$values[data$group == "group2"]
+
+# Check normality for both groups
+# Q-Q plots
+qqnorm(group1, main = "Q-Q Plot for Group 1")
+qqline(group1, col = "red")
+
+qqnorm(group2, main = "Q-Q Plot for Group 2")
+qqline(group2, col = "red")
+
+# Shapiro-Wilk test
+shapiro.test(group1)
+shapiro.test(group2)
+
+# Check variance homogeneity using Levene's test
+library(car)
+leveneTest(values ~ group, data = data) # A p-value greater than 0.05 indicates that the variances are equal (homoscedasticity). If < 0.05 -> use Welch's t-test
+
+# Identify outliers
+outlierTest(lm(differences ~ 1)) 
+# (rstudent): Residuals significantly different from 0 (typically greater than 2 or less than -2) suggest potential outliers.
+# (unadjusted p-value): A small p-value (typically < 0.05) indicates that the observation is a potential outlier.
+# (Bonferroni p) : A small Bonferroni p-value (typically < 0.05) indicates a strong evidence that the observation is an outlier
+```
+
+###  Welch t-tests 
+(Update 9th July 2024): Welch t-test is more appropriate than Wilcoxon test. 
+
+In the simplest possible terms, you control FWER (Bonferroni method) when you care about the result of the specific hypotheses tested whereas you control FDR (BH method) when you care about the number of significant results.
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+input <- percentage_normalized[[4]] %>%
+  filter(supplier %notin% c("Miscellanous", "unknown")) %>%
+  column_to_rownames(., var = "Sample_name")
+
+df <- data.frame(Feature=character(), comparison_pair=character(), pval=integer())
+
+for (c in 6:ncol(input)) {      
+  # looping through the combinations of product categories 
+  for (col in 1:ncol(utils::combn(unique(input$gas_station), 2))) {  # "sampling_season", "Octane_rating", "gas_station"
+    # print(c)
+    # extract the combinations of product category pairs
+    p_1 <- utils::combn(unique(input$gas_station), 2)[1,col]
+    p_2 <- utils::combn(unique(input$gas_station), 2)[2,col]
+    
+    # print(paste0(p_1, "_", p_2))
+    # calculating the p-value between each gas station pair 
+    pval <- try(t.test(as.numeric(unlist(input[which(input$gas_station == p_1), c])), 
+                   as.numeric(unlist(input[which(input$gas_station == p_2), c])))$p.value)
+    
+    # For cases when Error: not enough 'x' observations
+    if (inherits(pval, "try-error")) {
+      next  # Skip to the next iteration if an error occurs
+    }
+    # assigning row information
+    df[nrow(df) + 1,] <- c(colnames(input)[c], 
+                           paste0(p_1, " & ", p_2), 
+                           pval)
+  }
+}
+
+sig_comp_fillingNA0.001_TSN_normalized <- list()
+uncorrected_raw_pair_test_results <- list()
+j <- 1
+target_comp <- read_xlsx(path = paste0(getwd(), "/python/Shortened ILR Compound List PF001A 07-06-2024_Huy_modified_08Aug2024.xlsx"))
+
+pvaluecorrect <- c("bonferroni", "holm", "hochberg", "hommel", "BH", "BY")
+for (m in pvaluecorrect) {
+  df$adjusted_pvalue <- stats::p.adjust(df$pval, method = m)
+  sig_comp_fillingNA0.001_TSN_normalized[[j]] <- df %>%
+          filter(., adjusted_pvalue < 0.05) %>%
+          arrange(adjusted_pvalue)
+  
+  uncorrected_raw_pair_test_results[[j]] <- df
+  
+  if (dim(sig_comp_fillingNA0.001_TSN_normalized[[j]])[1] == 0) {
+    next
+  } else {
+    # get RT and ions information of chemical features
+    rt1 <- c()
+    rt2 <- c()
+    major <- c()
+    minor <- c()
+    compound_name <- c()
+    for (row in 1:nrow(sig_comp_fillingNA0.001_TSN_normalized[[j]])) {
+      # print(row)
+      rt1 <- c(rt1, metadata[which(metadata$Feature == as.numeric(sig_comp_fillingNA0.001_TSN_normalized[[j]][row,]$Feature)),]$RT1)
+      rt2 <- c(rt2,metadata[which(metadata$Feature == as.numeric(sig_comp_fillingNA0.001_TSN_normalized[[j]][row,]$Feature)),]$RT2)
+      major <- c(major, metadata[which(metadata$Feature == as.numeric(sig_comp_fillingNA0.001_TSN_normalized[[j]][row,]$Feature)),]$Ion1)
+      minor <- c(minor, metadata[which(metadata$Feature == as.numeric(sig_comp_fillingNA0.001_TSN_normalized[[j]][row,]$Feature)),]$Ion2)
+    }
+    
+    sig_comp_fillingNA0.001_TSN_normalized[[j]]$RT1 <- rt1
+    sig_comp_fillingNA0.001_TSN_normalized[[j]]$RT2 <- rt2
+    sig_comp_fillingNA0.001_TSN_normalized[[j]]$Ion1 <- major
+    sig_comp_fillingNA0.001_TSN_normalized[[j]]$Ion2 <- minor
+    
+    ## Get compound name 
+    compound_name <- c()
+    chem_grp <- c()
+    for (row in 1:nrow(sig_comp_fillingNA0.001_TSN_normalized[[j]])) {
+      idx <- which(abs(target_comp$RT1 - sig_comp_fillingNA0.001_TSN_normalized[[j]][row,]$RT1) <= 0.1 &
+                     abs(target_comp$RT2 - sig_comp_fillingNA0.001_TSN_normalized[[j]][row,]$RT2) <= 0.1 &
+                     abs(target_comp$Ion1 - sig_comp_fillingNA0.001_TSN_normalized[[j]][row,]$Ion1) <= 0.5 &
+                     abs(target_comp$Ion2 - sig_comp_fillingNA0.001_TSN_normalized[[j]][row,]$Ion2) <= 0.5)
+      # print(paste0(row, "_", idx))
+      if (identical(idx, integer(0))) {
+        chem_grp <- c(chem_grp, "unknown")
+        compound_name <- c(compound_name, "unknown")
+      }
+      chem_grp <- c(chem_grp, target_comp[idx,]$Group)
+      compound_name <- c(compound_name, target_comp[idx,]$Compound)
+    }
+    
+    sig_comp_fillingNA0.001_TSN_normalized[[j]]$compound_name <- compound_name
+    sig_comp_fillingNA0.001_TSN_normalized[[j]]$Chemical_group <- chem_grp
+    print(sig_comp_fillingNA0.001_TSN_normalized[[j]] %>%
+            arrange(adjusted_pvalue))
+    
+    j <- j + 1
+  }
+}
+
+# write_xlsx(sig_comp[[1]], path = paste0("Welchttest_", "top25", "_", "0.001_TSN_", format(Sys.time(), "%d-%m-%Y"), ".xlsx"))
+```
+### Bubble plots of significant compounds with labelling of Chemical groups
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+library(cowplot)
+library(ggpubr)
+
+## Unique + Non-uniques -----------------------------
+# Create subdf for 4 stations with majority of significant instances (3, 4, 6, 7), with 3 columns: RT1, RT2, Normalized Area
+df_station3467 <- p_df %>%
+  # Select only the significant compounds form Welch's t-test
+  dplyr::select(-setdiff(colnames(p_df[,6:ncol(p_df)]), unique(combined_df$Feature))) %>% 
+  # Select gas station
+  dplyr::filter(gas_station %in% c("Station 3", "Station 4", "Station 6", "Station 7"))
+
+master_list_3467 <- list()
+i <- 1
+for (names in c("Station 3", "Station 4", "Station 6", "Station 7")) {
+  master_list_3467[[i]] <- data.frame(t(colMeans(df_station3467 %>%
+                                                   filter(gas_station %in% names) %>%
+                                                   dplyr::select(-c(Octane_rating, sampling_season, gas_station, Sample_name, supplier)))))
+  
+  colnames(master_list_3467[[i]]) <- colnames(df_station3467[, 6:ncol(df_station3467)]) 
+  master_list_3467[[i]]$gas_station <- names
+  master_list_3467[[i]] <- master_list_3467[[i]] %>% pivot_longer(cols = 1:(ncol(.)-1), names_to = "Feature", values_to = "TSN Normalized Area")
+  i <- i + 1
+}
+
+# Adding compounds info (RTs, Ions, Chemical group) by full_join
+collapsed_df_station3467 <- full_join(bind_rows(master_list_3467), 
+                                       combined_df %>% 
+                                         dplyr::select(-comparison_pair) %>% 
+                                         distinct(), by = "Feature")
+ 
+  
+testbubble <- ggplot(data = collapsed_df_station3467, aes(x = RT1, y = RT2, size = `TSN Normalized Area`, color = `Chemical_group`)) +
+  geom_point(pch = 21) + 
+  facet_wrap(~gas_station) +
+  # scale_x_continuous(breaks = seq(from = 0, to = 40, by = 5)) +
+  scale_size(limits = c(min(collapsed_df_station3467$`TSN Normalized Area`),
+                        max(collapsed_df_station3467$`TSN Normalized Area`))) +
+  # scale_alpha(limits = c(min(min(df_gas$area), min(df_diesel$area)), 
+  #                        max(max(df_gas$area), max(df_diesel$area)))) +
+  guides(colour = guide_legend(override.aes = list(size=5))) +
+  theme_classic(base_size = 15) +
+  labs(x = "Retention time 1", y = "Retention time 2") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+   
+  # Add a red rectangular annotation
+  # BTEX
+  annotate("rect", xmin = 14, xmax = 17, ymin = 3.8, ymax = 4, 
+           color = "red", fill = NA, size = 1) +
+  # Castle Group
+  annotate("rect", xmin = 18.5, xmax = 21.5, ymin = 3.8, ymax = 3.95, 
+           color = "red", fill = NA, size = 1) +
+  # Unknown
+  annotate("rect", xmin = 6.5, xmax = 23.5, ymin = 3.1, ymax = 3.35, 
+           color = "red", fill = NA, size = 1)
+
+ggsave(filename = "testbubble_plot.tiff", 
+       plot = testbubble, 
+       device = "tiff",
+       dpi = 600,        # Set DPI to 600
+       width = 10,       # Width in inches (adjust as needed)
+       height = 8,       # Height in inches (adjust as needed)
+       units = "in") 
+
+## Only Non-uniques -----------------------------
+df_station3467 <- p_df %>%
+  # Select only the significant compounds form Welch's t-test
+  dplyr::select(-setdiff(colnames(p_df[,6:ncol(p_df)]), unique(combined_df$Feature))) %>% 
+  # Select gas station
+  dplyr::filter(gas_station %in% c("Station 3", "Station 4", "Station 6", "Station 7"))
+
+master_list_3467 <- list()
+i <- 1
+for (names in c("Station 3", "Station 4", "Station 6", "Station 7")) {
+  master_list_3467[[i]] <- data.frame(t(colMeans(df_station3467 %>%
+                                                   filter(gas_station %in% names) %>%
+                                                   dplyr::select(-c(Octane_rating, sampling_season, gas_station, Sample_name, supplier)))))
+  
+  colnames(master_list_3467[[i]]) <- colnames(df_station3467[, 6:ncol(df_station3467)]) 
+  master_list_3467[[i]]$gas_station <- names
+  master_list_3467[[i]] <- master_list_3467[[i]] %>% pivot_longer(cols = 1:(ncol(.)-1), names_to = "Feature", values_to = "TSN Normalized Area")
+  i <- i + 1
+}
+
+# Adding compounds info (RTs, Ions, Chemical group) by full_join
+collapsed_df_station3467 <- full_join(bind_rows(master_list_3467), 
+                                       combined_df %>% 
+                                         dplyr::select(-comparison_pair) %>% 
+                                         distinct(), by = "Feature")
+ 
+  
+ggplot(data = collapsed_df_station3467, aes(x = RT1, y = RT2, size = `TSN Normalized Area`, color = `Chemical_group`)) +
+  geom_point(pch = 21) + 
+  facet_wrap(~gas_station) +
+  # scale_x_continuous(breaks = seq(from = 0, to = 40, by = 5)) +
+  scale_size(limits = c(min(collapsed_df_station3467$`TSN Normalized Area`),
+                        max(collapsed_df_station3467$`TSN Normalized Area`))) +
+  # scale_alpha(limits = c(min(min(df_gas$area), min(df_diesel$area)), 
+  #                        max(max(df_gas$area), max(df_diesel$area)))) +
+  guides(colour = guide_legend(override.aes = list(size=5))) +
+  theme_classic(base_size = 15) +
+  labs(x = "Retention time 1", y = "Retention time 2",  color = "Chemical Group") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+   
+  # Add a red rectangular annotation
+  # BTEX
+  annotate("rect", xmin = 14, xmax = 17, ymin = 3.8, ymax = 4, 
+           color = "red", fill = NA, size = 1) +
+  # Castle Group
+  annotate("rect", xmin = 18.5, xmax = 21.5, ymin = 3.8, ymax = 3.95, 
+           color = "red", fill = NA, size = 1) +
+  # Unknown
+  annotate("rect", xmin = 6.5, xmax = 23.5, ymin = 3.1, ymax = 3.35, 
+           color = "red", fill = NA, size = 1)
+```
+
+
+# Clustering analyses
+
+## PCA and Cluster Resolution
+
+(Update 15 April 2024:) When using either Octane_rating OR sampling_season, there is no clustering whatsoever between seasons OR Octane rate
+
+!!! After removing unique cols
+*** With global minimum imputation:
+
+!! Tried top 150 compounds with highest cumulative peak area => still no clustering on both sampling seasons and octane rating.
+
+!! Tried top 150 compounds with highest variance 
+
+(Update 29th April:) 
+**DATA COMPRESSION OR NOT??**
+
+If I **compress all samples into a grouping variables**, such as Octane_rating or sampling_season, I can clearly see the differentiation between these grouping variables. 
+
+**For gas station, ** all 3 imputation techniques all resulted in low Dim1 and Dim2. However, with Zero and Global Min, there seems to be a grouping of gas station no. 2,8,3 (group 1); no. 1, 5 (group 2), no. 10, 4, 9, 7, 6 (group 3).
+
+***If I keep the samples separated*** , then I tried log normalization with 3 imputation techniques ==> Zero imputation will resulted in -Inf after Log-normalization so we can only do Global min and LOD. However, both global min and LOD does nto result in any clear grouping/clustering between "sampling_season", "Octane_rating", "gas_station".
+
+**LOG NORMALIZATION VERSUS. PERCENTAGE-BASED NORMALIZATION**
+I also tried remove the top 100 compounds that have really high mean and low variance across sample and perform zero//global min// LOD imputation on them and then tried Log-normalization ==> still no clustering between gas station!!
+
+Also, I tried to run PCA with un-normalized data (after imputation) with 3 imputation methods but still no clustering of gas stations across all 3 imputation methods.
+
+(Update 22nd May 2024:) 
+ - Clustering again with 'optimized' alignment windows -> No cluster of gas station
+ - Use only target compounds -> Still No cluster of gas station either with zero or LOD imputation coupled with TSN or Log normalization.
+
+### PCA
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+t_test_res <- read_xlsx(path = "C:/Users/huyng/OneDrive - Toronto Metropolitan University/Arson manuscript/Arson project/Rproject/Arson/Welch t test/Welchttest_top200_0.001_TSN_19-07-2024.xlsx")
+t_test_res <- t_test_res %>% 
+  filter(compound_name %notin% "unknown") %>%
+  mutate(pca_var = paste0(compound_name, " (RT1: ", round(RT1, 4), ", RT2: ", round(RT2, 4), ")"))
+
+name_list <- list()
+i <- 1
+for (name in unique(t_test_res$Feature)) {
+  name_list[[name]] <- unique(t_test_res[which(t_test_res$Feature == name),]$pca_var)
+}
+
+pca_input <- percentage_normalized[[4]] %>% 
+  select(c("gas_station", "Sample_name", unique(t_test_res$Feature))) %>%
+  filter(gas_station %in% c("Station 3", "Station 4", "Station 6", "Station 7")) %>%
+  column_to_rownames(., var = "Sample_name")
+
+colnames(pca_input) <- c("gas_station", unlist(name_list))
+
+combined_df <- bind_rows(sig_comp_fillingNA0.001_TSN_normalized[[1]] %>% dplyr::select(-c(pval, adjusted_pvalue)), 
+                         sig_comp_fillingNA0.001_TSN_normalized[[2]] %>% dplyr::select(-c(pval, adjusted_pvalue)), 
+                         sig_comp_fillingNA0.001_TSN_normalized[[3]] %>% dplyr::select(-c(pval, adjusted_pvalue)),
+                         sig_comp_fillingNA0.001_TSN_normalized[[4]] %>% dplyr::select(-c(pval, adjusted_pvalue)),
+                         sig_comp_fillingNA0.001_TSN_normalized[[5]] %>% dplyr::select(-c(pval, adjusted_pvalue)),
+                         sig_comp_fillingNA0.001_TSN_normalized[[6]] %>% dplyr::select(-c(pval, adjusted_pvalue))) %>% distinct()
+
+# -------------------------------------------------------------------------------------------------------------
+plot_list <- list()
+for (i in 1:length(percentage_normalized)) {
+  pca_input <-
+    percentage_normalized[[i]] %>% filter(supplier %notin% c("Miscellanous", "unknown"))
+  
+  final_vec <- Reduce(union, list(sig_comp_fillingNA0.001_TSN_normalized[[1]]$Feature, 
+                                  sig_comp_fillingNA0.001_TSN_normalized[[2]]$Feature, 
+                                  sig_comp_fillingNA0.001_TSN_normalized[[3]]$Feature, 
+                                  sig_comp_fillingNA0.001_TSN_normalized[[4]]$Feature, 
+                                  sig_comp_fillingNA0.001_TSN_normalized[[5]]$Feature, 
+                                  sig_comp_fillingNA0.001_TSN_normalized[[6]]$Feature))
+  
+  pca_input <- p_nonunique_df %>% dplyr::select(-setdiff(colnames(p_nonunique_df[,6:ncol(p_nonunique_df)]), final_vec)) %>% filter(gas_station %in% "Station 1")
+  
+  res.pca <- FactoMineR::PCA(
+    pca_input[, 6:ncol(pca_input)],
+    scale.unit = FALSE,
+    graph = FALSE)
+  
+  # Scree plot
+  # fviz_screeplot(res.pca, ncp=10)
+  
+  # Biplot
+  plot_list[[i]] <- factoextra::fviz_pca_biplot(res.pca,  
+                                                geom = "text",
+                                                label = "ind",
+                                                repel = TRUE,
+                                                labelsize = 5, 
+                                                habillage = factor(pca_input$gas_station), # "sampling_season", "Octane_rating", "gas_station", "Sample_name", "supplier"
+                                                # palette = "ucscgb",
+                                                addEllipses = TRUE,
+                                                ellipse.level = 0.95,
+                                                # xlim = c(-0.2, 0.2),
+                                                # ylim = c(-0.009, 0.009),
+                                                ggtheme = ggplot2::theme_minimal(base_size = 20),
+                                                title = paste0("Top ", ncol(pca_input[, 6:ncol(pca_input)]), " features")
+  ) + 
+    # if has error "Too few points to calculate an ellipse"
+    # ggforce::geom_mark_ellipse(aes(fill = Groups,
+    #                                color = Groups),
+    #                            label.buffer = unit(20, 'mm')) +
+    theme(legend.position = 'bottom',
+          panel.spacing = unit(0, "lines"))
+}
+
+grid.arrange(plot_list[[1]], 
+             plot_list[[2]], 
+             plot_list[[3]],
+             plot_list[[4]], ncol=2, nrow = 2)
+
+```
+
+### Cluster resolution
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 library(MASS)  # For mvrnorm
 library(stats)  # For ANOVA
@@ -994,7 +1472,7 @@ calculate_cluster_resolution <- function(data1, data2, initial_conf = 0.75) {
   return(conf.level)
 }
 
-# Function to perform ANOVA and rank variables
+# Function to perform ANOVA and rank variables from lowest to highest F
 rank_variables_anova <- function(data, group) {
   anova_results <- apply(data, 2, function(x) anova(lm(x ~ group))$`Pr(>F)`[1])
   ranked_vars <- order(anova_results)
@@ -1021,13 +1499,13 @@ rank_variables_high_mean_std <- function(data) {
 
 # Function to perform PCA and calculate cluster resolution for multiple groups
 variable_selection <- function(data, group, max_vars = 10) {
-  # ranked_vars <- rank_variables_anova(data, group)
-  ranked_vars <-  rank_variables_high_mean_std(data)
+  ranked_vars <- rank_variables_anova(data, group)
+  # ranked_vars <-  rank_variables_high_mean_std(data)
   selected_vars <- c()
   max_resolution <- 0
   resolutions <- c()
   
-  for (i in 1:max_vars) {
+  for (i in 1:max_vars) { # Backward feature elimination
     selected_vars <- c(selected_vars, ranked_vars[i])
     if (length(selected_vars) >= 2) {  # Ensure at least two variables are selected
       pca_model <- prcomp(data[, as.character(selected_vars)], center = TRUE, scale. = TRUE)
@@ -1089,237 +1567,6 @@ ggplot(resolutions_df, aes(x = num_vars, y = resolution)) +
         panel.grid.major.x = element_blank(),
         panel.grid.major.y = element_blank()
   )
-``` 
-
-
-# Multiple Welch t-tests with p-value correction for multiple testing
-
-```{r, echo = TRUE, message = FALSE, warning = FALSE}
-# Histogram
-hist(as.numeric(unlist(input[which(input$supplier == "Shell"), 13])), col='steelblue', main='')
-hist(as.numeric(unlist(input[which(input$supplier == "Cenovus"), 13])), col='steelblue', main='')
-
-# Q-Q plots aka. Normal Probability plots
-stats::qqnorm(as.numeric(unlist(input[which(input$supplier == "Shell"), 13])), main='')
-stats::qqline(as.numeric(unlist(input[which(input$supplier == "Shell"), 13])))
-
-stats::qqnorm(as.numeric(unlist(input[which(input$supplier == "Cenovus"), 13])), main='')
-stats::qqline(as.numeric(unlist(input[which(input$supplier == "Cenovus"), 13])))
-```
-
-### Levene’s test-non-normally distributed data & Fligner-Killeen test
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
-library(car)
-# Here is an example case of a significant compound taken from  Welch's t-test(for unequal variances) of suppliers
-data <- data.frame(group = factor(c(rep("group1", 
-                                        length(as.numeric(unlist(input[which(input$gas_station == "Station_3"), 13])))), 
-                                    rep("group2", 
-                                        length(as.numeric(unlist(input[which(input$gas_station == "Station_10"), 13])))))),
-                   values = c(as.numeric(unlist(input[which(input$gas_station == "Station_3"), 13])), 
-                              as.numeric(unlist(input[which(input$gas_station == "Station_10"), 13]))))
-                   
-# Separate the groups
-group1 <- data$values[data$group == "group1"]
-group2 <- data$values[data$group == "group2"]
-
-# Check normality for both groups
-# Q-Q plots
-qqnorm(group1, main = "Q-Q Plot for Group 1")
-qqline(group1, col = "red")
-
-qqnorm(group2, main = "Q-Q Plot for Group 2")
-qqline(group2, col = "red")
-
-# Shapiro-Wilk test
-shapiro.test(group1)
-shapiro.test(group2)
-
-# Check variance homogeneity using Levene's test
-library(car)
-leveneTest(values ~ group, data = data) # A p-value greater than 0.05 indicates that the variances are equal (homoscedasticity). If < 0.05 -> use Welch's t-test
-
-# Identify outliers
-outlierTest(lm(differences ~ 1)) 
-# (rstudent): Residuals significantly different from 0 (typically greater than 2 or less than -2) suggest potential outliers.
-# (unadjusted p-value): A small p-value (typically < 0.05) indicates that the observation is a potential outlier.
-# (Bonferroni p) : A small Bonferroni p-value (typically < 0.05) indicates a strong evidence that the observation is an outlier
-```
-
-###  Welch t-tests 
-(Update 9th July 2024): Welch t-test is more appropriate than Wilcoxon test. 
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
-input <- percentage_normalized[[4]] %>%
-  filter(supplier %notin% c("Miscellanous", "unknown")) %>%
-  column_to_rownames(., var = "Sample_name")
-
-sig_comp <- list()
-pair_test_results <- list()
-j <- 1
-
-df <- data.frame(Feature=character(), comparison_pair=character(), pval=integer())
-
-for (c in 6:ncol(input)) {      
-  # looping through the combinations of product categories 
-  for (col in 1:ncol(utils::combn(unique(input$gas_station), 2))) {  # "sampling_season", "Octane_rating", "gas_station"
-    # extract the combinations of product category pairs
-    p_1 <- utils::combn(unique(input$gas_station), 2)[1,col]
-    p_2 <- utils::combn(unique(input$gas_station), 2)[2,col]
-    
-    # calculating the p-value between each gas station pair 
-    pval <- t.test(as.numeric(unlist(input[which(input$gas_station == p_1), c])), 
-                   as.numeric(unlist(input[which(input$gas_station == p_2), c])))$p.value
-    # assigning row information
-    df[nrow(df) + 1,] <- c(colnames(input)[c], 
-                           paste0(p_1, " & ", p_2), 
-                           pval)
-  }
-}
-
-pvaluecorrect <- c("holm", "hochberg", "hommel", "BH", "BY")
-for (m in pvaluecorrect) {
-  df$adjusted_pvalue <- stats::p.adjust(df$pval, method = m)
-  print(df %>%
-          filter(., adjusted_pvalue < 0.05) %>%
-          arrange(adjusted_pvalue))
-  
-  sig_comp[[j]] <- df %>%
-          filter(., adjusted_pvalue < 0.05) %>%
-          arrange(adjusted_pvalue)
-  
-  pair_test_results[[j]] <- df
-  j <- j + 1
-}
-
-rt1 <- c()
-rt2 <- c()
-major <- c()
-minor <- c()
-chem_grp <- c()
-compound_name <- c()
-for (row in 1:nrow(sig_comp[[1]])) {
-  # print(row)
-  rt1 <- c(rt1, new_df[which(new_df$Feature == as.numeric(sig_comp[[1]][row,]$Feature)),]$RT1)
-  rt2 <- c(rt2,new_df[which(new_df$Feature == as.numeric(sig_comp[[1]][row,]$Feature)),]$RT2)
-  major <- c(major, new_df[which(new_df$Feature == as.numeric(sig_comp[[1]][row,]$Feature)),]$Ion1)
-  minor <- c(minor, new_df[which(new_df$Feature == as.numeric(sig_comp[[1]][row,]$Feature)),]$Ion2)
-  chem_grp <- c(chem_grp, new_df[which(new_df$Feature == as.numeric(sig_comp[[1]][row,]$Feature)),]$Chemical_group)
-}
-
-sig_comp[[1]]$RT1 <- rt1
-sig_comp[[1]]$RT2 <- rt2
-sig_comp[[1]]$Ion1 <- major
-sig_comp[[1]]$Ion2 <- minor
-sig_comp[[1]]$Chemical_group <- chem_grp
-
-## Get compound name 
-compound_name <- c()
-for (row in 1:nrow(sig_comp[[1]])) {
-  idx <- which(abs(ASTM$RT1 - sig_comp[[1]][row,]$RT1) <= 0.1 &
-                 abs(ASTM$RT2 - sig_comp[[1]][row,]$RT2) <= 0.1 &
-                 abs(ASTM$Ion1 - sig_comp[[1]][row,]$Ion1) <= 0.1 &
-                 abs(ASTM$Ion2 - sig_comp[[1]][row,]$Ion2) <= 0.1)
-  # print(paste0(row, "_", idx))
-  if (identical(idx, integer(0))) {
-    compound_name <- c(compound_name, "unknown")
-  }
-  compound_name <- c(compound_name, ASTM[idx,]$Compound)
-}
-sig_comp[[1]]$compound_name <- compound_name
-
-# write_xlsx(sig_comp[[1]], path = paste0("Welchttest_", "top25", "_", "0.001_TSN_", format(Sys.time(), "%d-%m-%Y"), ".xlsx"))
-```
-
-# Clustering analyses
-
-## PCA
-
-(Update 15 April 2024:) When using either Octane_rating OR sampling_season, there is no clustering whatsoever between seasons OR Octane rate
-
-!!! After removing unique cols
-*** With global minimum imputation:
-
-!! Tried top 150 compounds with highest cumulative peak area => still no clustering on both sampling seasons and octane rating.
-
-!! Tried top 150 compounds with highest variance 
-
-(Update 29th April:) 
-**DATA COMPRESSION OR NOT??**
-
-If I **compress all samples into a grouping variables**, such as Octane_rating or sampling_season, I can clearly see the differentiation between these grouping variables. 
-
-**For gas station, ** all 3 imputation techniques all resulted in low Dim1 and Dim2. However, with Zero and Global Min, there seems to be a grouping of gas station no. 2,8,3 (group 1); no. 1, 5 (group 2), no. 10, 4, 9, 7, 6 (group 3).
-
-***If I keep the samples separated*** , then I tried log normalization with 3 imputation techniques ==> Zero imputation will resulted in -Inf after Log-normalization so we can only do Global min and LOD. However, both global min and LOD does nto result in any clear grouping/clustering between "sampling_season", "Octane_rating", "gas_station".
-
-**LOG NORMALIZATION VERSUS. PERCENTAGE-BASED NORMALIZATION**
-I also tried remove the top 100 compounds that have really high mean and low variance across sample and perform zero//global min// LOD imputation on them and then tried Log-normalization ==> still no clustering between gas station!!
-
-Also, I tried to run PCA with un-normalized data (after imputation) with 3 imputation methods but still no clustering of gas stations across all 3 imputation methods.
-
-(Update 22nd May 2024:) 
- - Clustering again with 'optimized' alignment windows -> No cluster of gas station
- - Use only target compounds -> Still No cluster of gas station either with zero or LOD imputation coupled with TSN or Log normalization.
-
-```{r, echo = FALSE, message = FALSE, warning = FALSE}
-t_test_res <- read_xlsx(path = "C:/Users/huyng/OneDrive - Toronto Metropolitan University/Arson manuscript/Arson project/Rproject/Arson/Welch t test/Welchttest_top200_0.001_TSN_19-07-2024.xlsx")
-t_test_res <- t_test_res %>% 
-  filter(compound_name %notin% "unknown") %>%
-  mutate(pca_var = paste0(compound_name, " (RT1: ", round(RT1, 4), ", RT2: ", round(RT2, 4), ")"))
-
-name_list <- list()
-i <- 1
-for (name in unique(t_test_res$Feature)) {
-  name_list[[name]] <- unique(t_test_res[which(t_test_res$Feature == name),]$pca_var)
-}
-
-pca_input <- percentage_normalized[[4]] %>% 
-  select(c("gas_station", "Sample_name", unique(t_test_res$Feature))) %>%
-  filter(gas_station %in% c("Station 3", "Station 4", "Station 6", "Station 7")) %>%
-  column_to_rownames(., var = "Sample_name")
-
-colnames(pca_input) <- c("gas_station", unlist(name_list))
-------------------------------------------------------------------------------------------------------------------
-plot_list <- list()
-for (i in 1:length(percentage_normalized)) {
-  pca_input <-
-    percentage_normalized[[i]] %>% filter(supplier %notin% c("Miscellanous", "unknown"))
-  
-  res.pca <- FactoMineR::PCA(
-    pca_input[, 6:ncol(pca_input)],
-    scale.unit = FALSE,
-    graph = FALSE)
-  
-  # Scree plot
-  # fviz_screeplot(res.pca, ncp=10)
-  
-  # Biplot
-  plot_list[[i]] <- factoextra::fviz_pca_biplot(res.pca,  
-                                                geom = "text",
-                                                label = "ind",
-                                                repel = TRUE,
-                                                labelsize = 5, 
-                                                habillage = factor(pca_input$gas_station), # "sampling_season", "Octane_rating", "gas_station", "Sample_name", "supplier"
-                                                # palette = "ucscgb",
-                                                addEllipses = TRUE,
-                                                ellipse.level = 0.95,
-                                                # xlim = c(-0.2, 0.2),
-                                                # ylim = c(-0.009, 0.009),
-                                                ggtheme = ggplot2::theme_minimal(base_size = 20),
-                                                title = paste0("Top ", ncol(pca_input[, 6:ncol(pca_input)]), " features")
-  ) + 
-    # if has error "Too few points to calculate an ellipse"
-    # ggforce::geom_mark_ellipse(aes(fill = Groups,
-    #                                color = Groups),
-    #                            label.buffer = unit(20, 'mm')) +
-    theme(legend.position = 'bottom',
-          panel.spacing = unit(0, "lines"))
-}
-
-grid.arrange(plot_list[[1]], 
-             plot_list[[2]], 
-             plot_list[[3]],
-             plot_list[[4]], ncol=2, nrow = 2)
-
 ```
 
 ## NMDS 
@@ -1445,7 +1692,7 @@ umap_plot
 ```
 
 
-### SIMCA
+# SIMCA
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 library(chemometrics)
 library(pls)
@@ -1537,12 +1784,98 @@ confusionMatrix(factor(predictions, levels = class_levels), Y_test)
 ```
 
 
+# Log-likelihood Ratio
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+# Load necessary libraries
+library(MASS)
+library(stats)
+library(ks)
+
+# Function to calculate peak area ratios
+calculate_ratios <- function(data) {
+  ratios <- data
+  # Calculate all peak area ratios
+  for (i in 1:ncol(data)) {
+    for (j in 1:ncol(data)) {
+      if (i != j) {
+        ratios <- cbind(ratios, data[, i] / data[, j])
+      }
+    }
+  }
+  return(ratios)
+}
+
+# Function to compute F'
+compute_F_prime <- function(ratios) {
+  n <- nrow(ratios)
+  F_prime <- rep(0, ncol(ratios))
+  
+  for (k in 1:ncol(ratios)) {
+    R <- ratios[, k]
+    R_mean <- apply(ratios, 1, mean)
+    sdR <- sd(R)
+    
+    F_prime[k] <- (1 / n) * sqrt(sum((R / R_mean - 1)^2)) * (1 / sdR)
+  }
+  return(F_prime)
+}
+
+# Function to calculate distances d1
+calculate_d1 <- function(ratios_stationA, ratios_stationB) {
+  d1 <- sqrt(rowSums(log(ratios_stationA / ratios_stationB)^2))
+  return(d1)
+}
+
+# Example usage
+data <- matrix(rnorm(1000), nrow=100, ncol=10)  # Replace with your data
+evaporation_levels <- c(0, 25, 50, 75)
+ratios <- calculate_ratios(data)
+F_prime <- compute_F_prime(ratios, evaporation_levels)
+stable_ratios <- order(F_prime[F_prime < 0.05])[1:13]  # Keeping F prime < 0.05 -> Select 13 most stable ratios
+
+# Assuming ratios_evaporated and ratios_unevaporated are available
+d1 <- calculate_d1(ratios_evaporated, ratios_unevaporated)
+
+# Kernel density estimation
+density_d1 <- kde(d1)
+```
 
 
+### Score-Based Likelihood Ratio:
+Using Linear Discriminant Analysis (LDA) for score calculation.
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+library(e1071)
 
+# Perform LDA
+lda_model <- qda(supplier ~ ., data = p_test[, c(6:ncol(p_test))] %>% filter(supplier %notin% "unknown"))
 
+# Predict and obtain scores
+lda_predict <- predict(lda_model, p_test[, c(5, 6:ncol(p_test))] %>% filter(supplier %notin% "unknown"))
+scores <- lda_predict$x
 
+# Calculate likelihood ratios (LR)
+calculate_lr <- function(scores, true_labels) {
+  lr_values <- numeric(length(true_labels))
+  
+  for (i in 1:length(true_labels)) {
+    same_class <- scores[true_labels == true_labels[i], ]
+    different_class <- scores[true_labels != true_labels[i], ]
+    
+    mean_same <- colMeans(same_class)
+    mean_diff <- colMeans(different_class)
+    
+    cov_same <- cov(same_class)
+    cov_diff <- cov(different_class)
+    
+    lr <- dmvnorm(scores[i, ], mean_same, cov_same) / dmvnorm(scores[i, ], mean_diff, cov_diff)
+    lr_values[i] <- lr
+  }
+  return(lr_values)
+}
 
+# Assuming the true labels are stored in a vector called 'labels'
+lr_values <- calculate_lr(scores, labels)
+```
 
 
 
