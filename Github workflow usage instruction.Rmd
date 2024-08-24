@@ -1252,7 +1252,7 @@ testbubble <- ggplot(data = collapsed_df_station3467, aes(x = RT1, y = RT2, size
   annotate("rect", xmin = 6.5, xmax = 23.5, ymin = 3.1, ymax = 3.35, 
            color = "red", fill = NA, size = 1)
 
-ggsave(filename = "testbubble_plot.tiff", 
+ggsave(filename = paste0("Bubble_plot","_both-unique-and-non-unique_filNA0.001_TSN_sig_comp_unique_and_nonunique_unionize", format(Sys.time(), "%d-%m-%Y"),".tiff"), 
        plot = testbubble, 
        device = "tiff",
        dpi = 600,        # Set DPI to 600
@@ -1310,6 +1310,14 @@ ggplot(data = collapsed_df_station3467, aes(x = RT1, y = RT2, size = `TSN Normal
   # Unknown
   annotate("rect", xmin = 6.5, xmax = 23.5, ymin = 3.1, ymax = 3.35, 
            color = "red", fill = NA, size = 1)
+
+ggsave(filename = paste0("Bubble_plot","_only_non-uniquefillNA0.001_TSN_sig_comp_nonunique_unionize", format(Sys.time(), "%d-%m-%Y"),".tiff"), 
+       plot = testbubble, 
+       device = "tiff",
+       dpi = 600,        # Set DPI to 600
+       width = 10,       # Width in inches (adjust as needed)
+       height = 8,       # Height in inches (adjust as needed)
+       units = "in") 
 ```
 
 
