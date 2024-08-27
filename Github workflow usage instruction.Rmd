@@ -1195,6 +1195,7 @@ for (m in pvaluecorrect) {
 
 # write_xlsx(sig_comp[[1]], path = paste0("Welchttest_", "top25", "_", "0.001_TSN_", format(Sys.time(), "%d-%m-%Y"), ".xlsx"))
 ```
+
 ### Bubble plots of significant compounds with labelling of Chemical groups
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 library(cowplot)
@@ -1300,24 +1301,35 @@ ggplot(data = collapsed_df_station3467, aes(x = RT1, y = RT2, size = `TSN Normal
   labs(x = "Retention time 1", y = "Retention time 2",  color = "Chemical Group") +
   theme(plot.title = element_text(hjust = 0.5)) +
    
-  # Add a red rectangular annotation
-  # BTEX
-  annotate("rect", xmin = 14, xmax = 17, ymin = 3.8, ymax = 4, 
-           color = "red", fill = NA, size = 1) +
-  # Castle Group
-  annotate("rect", xmin = 18.5, xmax = 21.5, ymin = 3.8, ymax = 3.95, 
-           color = "red", fill = NA, size = 1) +
+  # Add a annotation of chemical groups
   # Unknown
   annotate("rect", xmin = 6.5, xmax = 23.5, ymin = 3.1, ymax = 3.35, 
-           color = "red", fill = NA, size = 1)
+           color = "red", fill = NA, size = 0.5) + 
+  annotate("text", x = 6, y = 3.35, label = "1", 
+           hjust = 0, vjust = 0.5, size = 5, color = "black", fontface = "bold") +
+  # BTEX
+  annotate("rect", xmin = 14, xmax = 17, ymin = 3.8, ymax = 4, 
+           color = "red", fill = NA, size = 0.5)  +
+  annotate("text", x = 13.5, y = 4, label = "2", 
+           hjust = 0, vjust = 0.5, size = 5, color = "black", fontface = "bold") +
+  # Castle Group
+  annotate("rect", xmin = 18.5, xmax = 21.5, ymin = 3.8, ymax = 3.95, 
+           color = "red", fill = NA, size = 0.5) + 
+  annotate("text", x = 18, y = 3.95, label = "3", 
+           hjust = 0, vjust = 0.5, size = 5, color = "black", fontface = "bold")
+  
 
-ggsave(filename = paste0("Bubble_plot","_only_non-uniquefillNA0.001_TSN_sig_comp_nonunique_unionize", format(Sys.time(), "%d-%m-%Y"),".tiff"), 
+ggsave(filename = paste0("Bubble_plot","_only_non-uniquefillNA0.001_TSN_sig_comp_nonunique_unionize", format(Sys.time(), "%d-%m-%Y"),".png"), 
        plot = testbubble, 
-       device = "tiff",
+       device = "png",
        dpi = 600,        # Set DPI to 600
-       width = 10,       # Width in inches (adjust as needed)
+       width = 13,       # Width in inches (adjust as needed)
        height = 8,       # Height in inches (adjust as needed)
        units = "in") 
+
+
+
+# Figure out what are these unknown
 ```
 
 
