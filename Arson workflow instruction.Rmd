@@ -43,21 +43,14 @@ library(gridExtra)
 library(stats)
 library(FactoMineR)
 library(factoextra)
-# library(compositions)
 library(ggforce)
-# library(latticeExtra)
-# library(cluster)
-# library(umap)
-# library(plotly)
-# library(NADA2)
-# library(EnvStats)
-# library(CensSpatial)
-# library(mice)
-# library(jsonlite)
+library(caret)
+library(xgboost)
+library(lightgbm)
+library(pROC)
+library(dplyr)
 library(missForest)      # for random forest imputation
-# library(pcaMethods)      # for Bayesian PCA (bpca)
 library(VIM)             # for kNN imputation (kNN())
-library(softImpute)      # for SVD-based imputation (softImpute)
 library(randomForest)
 library(caret)           # for model training & cross-validation
 library(stats)           # for basic stats tests, prcomp, etc.
@@ -1010,11 +1003,10 @@ grid.arrange(grobs = create_violin_plots(final_cleandf[, -c(1,2,3,4,5)]), ncol =
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 df <- coredf
 
-# Step 1: Remove features with values in only one row
+# Step 1: Remove features with values in only one sample (row) ---------
 df_filtered_step1 <- df[, colSums(!is.na(df) & df != 0) > 1]
 
-# Step 2: Remove features with values in only one gas_station label
-library(dplyr)
+# Step 2: Remove features with values in only one gas_station label --------
 
 # Identify feature columns (excluding the "gas_station" label)
 feature_columns <- setdiff(names(df_filtered_step1), "gas_station")
@@ -1028,7 +1020,7 @@ keep_features <- sapply(df_filtered_step1[, feature_columns], function(feature) 
 # Subset the dataframe to retain the desired features and "gas_station"
 df_filtered_step2 <- df_filtered_step1[, c(names(df_filtered_step1)[keep_features])]
 
-# Step 3: Remove features with less than 3 data points per gas_station label
+# Step 3: Remove features with less than 3 data points per gas_station label  ---------
 selected_col <- integer()
 gas_station_combinations <- t(utils::combn(unique(df_filtered_step2$gas_station), 2))
 # Loop through the feature columns
@@ -1051,6 +1043,21 @@ for (feature_col in 6:ncol(df_filtered_step2)) {
 }
 
 df_filtered_step3 <- cbind(df_filtered_step2[, c(1:5)], df_filtered_step2[, selected_col])
+
+#-----------------------------#
+# STEP 4: Identify & remove features that are >90% missing overall
+#-----------------------------#
+colid_90_missingvalues <- c()
+
+for (i in 6:ncol(df_filtered_step3)) {
+  if (length(df_filtered_step3[which(is.na(df_filtered_step3[, i])), i]) / nrow(df_filtered_step3) > 0.7) {
+    colid_90_missingvalues <- c(colid_90_missingvalues, i)
+  }
+}
+
+if (!is.null(colid_90_missingvalues)) {
+  df_filtered_step4 <- df_filtered_step3[, -colid_90_missingvalues]
+}
 ```
 
 
@@ -1070,29 +1077,57 @@ impute_0.001 <- function(df) {
   return(df_0.001)
 }
 
-## Option 2: LOD imputation 
-## For each row, missing values in numeric columns (6:ncol) are replaced with 3 * (the lowest non-NA value in that row)
-# impute_LOD <- function(df) {
-#   df_out <- df
-#   num_cols <- 6:ncol(df_out)
-#   for (r in 1:nrow(df_out)) {
-#     # extract numeric values in this row
-#     row_vals <- as.numeric(df_out[r, num_cols])
-#     missing_idx <- which(is.na(row_vals))
-#     if (length(missing_idx) > 0) {
-#       # only calculate minimum if there are non-missing values
-#       if (sum(!is.na(row_vals)) > 0) {
-#         min_val <- min(row_vals, na.rm = TRUE)
-#         fill_val <- 3 * min_val
-#       } else {
-#         fill_val <- NA  # if the row is entirely NA (unlikely), you could choose a default value
-#       }
-#       row_vals[missing_idx] <- fill_val
-#       df_out[r, num_cols] <- row_vals
-#     }
-#   }
-#   return(df_out)
-# }
+## 1.3 Mean Imputation
+mean_imputation <- function(df){
+  df_numeric <- df
+  for(i in seq_along(df_numeric)){
+    col_data <- df_numeric[[i]]
+    # Replace NA with mean
+    col_data[is.na(col_data)] <- mean(col_data, na.rm = TRUE)
+    df_numeric[[i]] <- col_data
+  }
+  return(df_numeric)
+}
+
+## 1.4 kNN Imputation
+knn_imputation <- function(df, k = 5){
+  # VIM::kNN modifies the data in place; to avoid that, use a copy
+  df_copy <- df
+  # kNN returns a data.frame with the imputed columns appended with ".imp"
+  # The original columns remain but with no missing values replaced in place
+  # So we can do something like:
+  imputed_data <- kNN(df_copy, k = k, imp_var = FALSE)  # no new columns
+  return(imputed_data)
+}
+
+## 1.7 Fill with half-min of non-missing values
+half_min_imputation <- function(df){
+  df_imputed <- df
+  for(i in seq_along(df_imputed)){
+    col_data <- df_imputed[[i]]
+    non_zero <- col_data[col_data > 0]
+    if(length(non_zero) > 0){
+      half_min_val <- min(non_zero, na.rm = TRUE) / 2
+      col_data[is.na(col_data)] <- half_min_val
+    } else {
+      # if entire column is zero or NA, just set to 0 or small value
+      col_data[is.na(col_data)] <- 0
+    }
+    df_imputed[[i]] <- col_data
+  }
+  return(df_imputed)
+}
+
+## 1.8 Fill with median
+median_imputation <- function(df){
+  df_imputed <- df
+  for(i in seq_along(df_imputed)){
+    col_data <- df_imputed[[i]]
+    col_data[is.na(col_data)] <- median(col_data, na.rm = TRUE)
+    df_imputed[[i]] <- col_data
+  }
+  return(df_imputed)
+}
 
 ## Option 3: Replace missing values with randomized values drawn from a uniform distribution 
 ## The random numbers are drawn with min = 0 and max = the global minimum among all numeric values.
@@ -1117,7 +1152,7 @@ impute_random_uniform <- function(df) {
 ## Option 4: Imputation with missForest 
 impute_missforest <- function(df){
   # missForest returns a list: $ximp is the completed data
-  imputed <- missForest(as.data.frame(df), verbose = FALSE)$ximp
+  imputed <- missForest::missForest(as.data.frame(df), verbose = FALSE)$ximp
   return(imputed)
 }
 
@@ -1146,6 +1181,34 @@ normalize_log <- function(df) {
 no_normalization <- function(x){
   return(x)
 }
+
+## 2.2 Min-Max scaler 
+scale_minmax <- function(df){
+  # We can do it manually or use caret::preProcess
+  # Here is a manual approach for numeric columns
+  df_mat <- as.matrix(df)
+  mins <- apply(df_mat, 2, min, na.rm = TRUE)
+  maxs <- apply(df_mat, 2, max, na.rm = TRUE)
+  
+  scaled_mat <- sweep(df_mat, 2, mins, FUN = "-")
+  ranges <- maxs - mins
+  scaled_mat <- sweep(scaled_mat, 2, ranges, FUN = "/")
+  
+  # convert back to data frame
+  df_scaled <- as.data.frame(scaled_mat)
+  colnames(df_scaled) <- colnames(df)
+  rownames(df_scaled) <- rownames(df)
+  
+  return(df_scaled)
+}
+
+## 2.3 Z-score normalization
+z_score_normalization <- function(df){
+  # scale() in R does mean-center and unit variance by column
+  df_scaled <- scale(df, center = TRUE, scale = TRUE)
+  return(as.data.frame(df_scaled))
+}
+
 
 ###########################################
 ## 3. Downstream Evaluation Functions  ##
@@ -1193,10 +1256,11 @@ pairwise_significance_tests_modified <- function(input_df,
           
           # Use wilcox.test if one or both groups are not normally distributed;
           # otherwise, use t.test.
+          # here we used paired=TRUE, because each feature in one category also appears in the other category (we compare one feature at a time(.
           if(shapiro1 < 0.05 || shapiro2 < 0.05) {
-            pval <- tryCatch(stats::wilcox.test(vec1, vec2)$p.value, error = function(e) NA)
+            pval <- tryCatch(stats::wilcox.test(vec1, vec2, paired = TRUE)$p.value, error = function(e) NA)
           } else {
-            pval <- tryCatch(stats::t.test(vec1, vec2)$p.value, error = function(e) NA)
+            pval <- tryCatch(stats::t.test(vec1, vec2, paired=TRUE)$p.value, error = function(e) NA)
           }
         }
       } else {
@@ -1348,58 +1412,18 @@ calculate_average_cluster_resolution <- function(X, group_vector) {
   return(avg_resolution)
 }
 
-evaluate_rf_test_accuracy <- function(data, 
-                                      type_col, 
-                                      remove_cols, 
-                                      train_proportion,
-                                      ntree_candidates = c(100, 500, 1000, 2500), 
-                                      seed  = NULL, 
-                                      metric = "Accuracy",
-                                      split_with_miscunknown_supplier) {
-  X <- data %>% dplyr::select(-c(all_of(remove_cols), all_of(type_col)))
-  y <- data[[type_col]]
+evaluate_rf_performance <- function(data, 
+                                    type_col, 
+                                    remove_cols, 
+                                    train_proportion,
+                                    ntree_candidates = c(100, 500, 1000, 2500), 
+                                    seed  = NULL, 
+                                    metric = "Accuracy") {
   
-  if(split_with_miscunknown_supplier) {
-    cat("Splitting train/test with special condition for 'supplier'.\n")
-    ## Here we use only samples that are not Misc or Unknown as training and testing on Misc + Unknown + small portion of non-Misc/unknown samples
-    # Identify samples to force into the test set
-    special_idx <- which(data[[type_col]] %in% excluding_supplier)
-    
-    # All other samples
-    remaining_idx <- setdiff(seq_len(nrow(data)), special_idx)
-
-    # Set seed for reproducibility if not provided
-    if(is.null(seed)) {
-      set.seed(sample.int(999,1))
-    }
-
-    # Split the remaining samples according to train_proportion
-    train_remaining <- createDataPartition(data[[type_col]][remaining_idx],
-                                           p = train_proportion, list=FALSE)
-    train_remaining_idx <- remaining_idx[train_remaining]
-    test_remaining_idx  <- setdiff(remaining_idx, train_remaining_idx)
-
-    # The test set is the union of the test_remaining and all the special samples
-    test_idx <- c(test_remaining_idx, special_idx)
-
-    X_train <- X[train_remaining_idx, ]
-    X_test  <- X[test_idx, ]
-    y_train <- y[train_remaining_idx]
-    y_test  <- y[test_idx]
-    y_train <- droplevels(y_train)
-    # Drop unused factor levels from y_train so that it doesn't contain
-    # levels "Miscellanous" or "unknown" that have no observations
-    
-  } else {
-    cat("\n### Using Original Train/Test Split ###\n")
-    
-    if(is.null(seed)) {
-      set.seed(sample.int(999, 1))
-    }
-    train_index <- caret::createDataPartition(y, p = train_proportion, list = FALSE)
-    train_data <- data[train_index, ]
-    test_data  <- data[-train_index, ]
-  }
+  set.seed(123)
+  train_index <- caret::createDataPartition(y, p = train_proportion, list = FALSE)
+  train_data <- data[train_index, ]
+  test_data  <- data[-train_index, ]
   
   # Drop unused factor levels after splitting
   train_data[[type_col]] <- droplevels(train_data[[type_col]])
@@ -1411,50 +1435,26 @@ evaluate_rf_test_accuracy <- function(data,
   X_test  <- test_data %>% dplyr::select(-c(all_of(remove_cols), all_of(type_col)))
   y_test  <- test_data[[type_col]]
   
-  # 7) Setup Cross-Validation Control
   min_class_count <- min(table(y_train))
   folds <- ifelse(min_class_count > 1, min_class_count, 2)
-  cv_ctrl <- caret::trainControl(method = "cv", number = folds, classProbs = TRUE)
+  cv_ctrl <- trainControl(
+    method     = "cv",
+    number     = folds,
+    classProbs = TRUE
+  )
   
-  # 8) Full-Feature Classification: Grid Search over (mtry, ntree)
-  num_features <- ncol(X_train)
+  num_features    <- ncol(X_train)
   mtry_candidates <- c(floor(sqrt(num_features)), floor(log2(num_features)))
-  rf_grid <- expand.grid(mtry = mtry_candidates)
+  rf_grid         <- expand.grid(mtry = mtry_candidates)
   
-  best_model <- NULL
-  best_metric_val <- -Inf
-  best_trees <- NA
+  all_feats <- tune_rf_subset(
+    X_train, y_train, X_test, y_test,
+    cv_ctrl, ntree_candidates, metric
+  )
   
-  for(ntree in ntree_candidates){
-    set.seed(sample.int(999, 1))
-    rf_fit <- caret::train(x = X_train,
-                           y = as.factor(y_train),
-                           method = "rf",
-                           trControl = cv_ctrl,
-                           tuneGrid = rf_grid,
-                           metric = metric,
-                           ntree = ntree,
-                           importance = TRUE)
-    current_best <- max(rf_fit$results[[metric]])
-    if(current_best > best_metric_val){
-      best_metric_val <- current_best
-      best_model <- rf_fit
-      best_trees <- ntree
-    }
-  }
+  eval_metrics <- all_feats$eval_metrics
   
-  final_rf <- best_model$finalModel
-  
-  pred_prob_test <- predict(best_model, newdata = X_test, type = "prob")
-  new_pred_df_test <- as.data.frame(pred_prob_test)
-  new_pred_df_test[[type_col]] <- y_test
-  
-  y_test_aligned <- factor(as.character(y_test), levels = levels(y_train))
-  pred_class_test <- predict(best_model, newdata = X_test, type = "raw")
-  pred_class_test_aligned <- factor(as.character(pred_class_test), levels = levels(y_train))
-  
-  acc_full <- sum(pred_class_test_aligned == y_test_aligned, na.rm = TRUE) / length(y_test_aligned)
-  return(acc_full)
+  return(eval_metrics)
 }
 
 evaluate_model_stability <- function(
@@ -1512,27 +1512,32 @@ evaluate_model_stability <- function(
 ##############################################
 # Define lists of new imputation and normalization functions
 imputation_methods <- list(
+  impute_missforest    = impute_missforest,
+  impute_random_uniform = impute_random_uniform,
+  mean_imputation            = mean_imputation,
+  knn_imputation             = knn_imputation,
   impute_0.001         = impute_0.001,
-  # impute_LOD           = impute_LOD,
-  impute_random_uniform= impute_random_uniform,
-  impute_missforest    = impute_missforest
+  half_min_imputation        = half_min_imputation,
+  median_imputation          = median_imputation
 )
 
 normalization_methods <- list(
   Percentage_Normalization = normalize_percentage,
+  Min_Max_Scaler       = scale_minmax,
+  Z_Score_Normalization= z_score_normalization,
   Log_Normalization        = normalize_log,
   No_normalization     = no_normalization
 )
 
 find_best_impute_normalize_new <- function(df,
-                                       type_col,
-                                       group_for_significance,
-                                       remove_cols,
-                                       train_proportion,
-                                       split_with_miscunknown_supplier,
-                                       start_col_index,
-                                       metadata,
-                                       target_comp) {
+                                           type_col,
+                                           group_for_significance,
+                                           remove_cols,
+                                           train_proportion,
+                                           split_with_miscunknown_supplier,
+                                           start_col_index,
+                                           metadata,
+                                           target_comp) {
   # 1) Extract numeric features X and target y
   X       <- df %>% dplyr::select(-all_of(c(remove_cols, type_col))) %>% as.data.frame()
   y       <- df[[type_col]]
@@ -1591,7 +1596,7 @@ find_best_impute_normalize_new <- function(df,
       # Compute correlation matrix on original data using pairwise complete observations
       orig_corr <- cor(X, use = "pairwise.complete.obs")
       # Compute correlation matrix on imputed/normalized data
-      imp_corr <- cor(X_norm)
+      imp_corr <- cor(X_norm, use = "pairwise.complete.obs")
       # Extract upper-triangle values (excluding diagonal) for both matrices
       orig_upper <- orig_corr[upper.tri(orig_corr)]
       imp_upper  <- imp_corr[upper.tri(imp_corr)]
@@ -1599,7 +1604,7 @@ find_best_impute_normalize_new <- function(df,
       corr_score <- cor(orig_upper, imp_upper, use = "complete.obs")
       
       ###############################
-      ##  New: KS Test p-value: Compare the distribution of imputed values against that of the observed data ##
+      ##  New: KS Test p-value: Compare the distribution of orignal data with missing values against data with imputed values ##
       ###############################
       # Combine observed values and imputed values across all numeric columns
       observed_all <- c()
@@ -1609,8 +1614,14 @@ find_best_impute_normalize_new <- function(df,
         missing_idx <- which(is.na(X[[col]]))
         # Only consider columns that originally had missing values and at least one observed value
         if(length(missing_idx) >= 1 && length(X[[col]][!is.na(X[[col]])]) >= 1){
+          # 1) original non‐missing values in this column
           obs_values <- X[[col]][!is.na(X[[col]])]
-          imp_values <- X_norm[[col]][missing_idx]
+          
+          # 2) entire column from the imputed dataset (includes both originally observed
+          #    and newly imputed values)
+          imp_values <- X_norm[[col]]
+          
+          # Append to the pooled vectors
           observed_all <- c(observed_all, obs_values)
           imputed_all  <- c(imputed_all, imp_values)
         }
@@ -1634,12 +1645,11 @@ find_best_impute_normalize_new <- function(df,
       ###############################
       # Use the imputed/normalized data (X_norm) and class vector y to compute test accuracy.
       df_input_test_acc <- cbind(X_norm, df[,c(type_col, remove_cols)])
-      # 
-      # test_acc <- evaluate_rf_test_accuracy(data = df_input_test_acc,
-      #                                       type_col=type_col,
-      #                                       remove_cols=remove_cols, 
-      #                                       train_proportion = train_proportion,
-      #                                       split_with_miscunknown_supplier= split_with_miscunknown_supplier)
+
+      acc_kappa_auc <- evaluate_rf_performance(data = df_input_test_acc,
+                                               type_col=type_col,
+                                               remove_cols=remove_cols,
+                                               train_proportion = train_proportion)
       
       # Evaluate CV accuracy
       rf_stability <- evaluate_model_stability(X_norm, y)
@@ -1658,11 +1668,14 @@ find_best_impute_normalize_new <- function(df,
         Normalization= norm_name,
         ClusterRes    = cluster_res,
         CorrScore     = corr_score,
-        sig_num       = sig_num,
         KS_p          = ks_p,
         CVmean       = cv_mean,
         CVstd        = cv_std,
-        # TestAcc       = test_acc,
+        TestAcc       = performance_output$Accuracy,
+        Kappa = performance_output$Kappa,
+        AUC = performance_output$AUC,
+        F1_Weighted = performance_output$F1_Weighted,
+        MCC_Multiclass = performance_output$MCC_Multiclass,
         stringsAsFactors=FALSE
       )
     }
@@ -1670,21 +1683,19 @@ find_best_impute_normalize_new <- function(df,
   
   df_results <- do.call(rbind, results_list)
   
-  # 3) Choose “best” combo. For example, rank by each criterion, then sum of ranks
-  # df_results$rank_clusterRes <- rank(-df_results$ClusterRes, ties.method = "min")
-  # df_results$rank_corrScore  <- rank(-df_results$CorrScore,  ties.method = "min")
-  # df_results$rank_KS       <- rank(-df_results$KS_p,       ties.method = "min")
-  # df_results$rank_TestAcc    <- rank(-df_results$TestAcc,    ties.method = "min")
-  
   # Build an ordering index: primary by TestAcc, secondary by ClusterRes, etc.
   ord <- order(
+    -df_results$F1_Weighted,
+    -df_results$MCC_Multiclass,
+     -df_results$AUC,
+    -df_results$TestAcc,
+    # -df_results$F1_Macro,
     -df_results$ClusterRes,
-    -df_results$sig_num,
-    -df_results$CVmean,
-    df_results$CVstd,
-    # -df_results$TestAcc,
+    # -df_results$CVmean,
+    # df_results$CVstd,
     -df_results$CorrScore,   # smaller rank_corrScore = better CorrScore
-    -df_results$KS_p           # smaller rank_KS = better KS_p
+    -df_results$KS_p
+    # -df_results$Kappa,           # smaller  = better KS_p
   )
   
   # Initialize and fill combined_rank so that best row gets 1
@@ -1722,9 +1733,9 @@ final_cleandf_RFE <- cbind(df_percentage[, c(1,2,3,4,5)],
                                   dplyr::select(rfe_important_features)) 
 ```
 
-# Figure 1. Two subplots 
+# Figure 2. Two subplots 
 ** left-subplot: percentage composition of chemical group in metadata; 
-** right-subplot: bar plot with whisker of signal intensity of each chemical group in metadata
+** right-subplot: horizontal stacked bar plot of signal intensity across gas stations of each chemical group in metadata
 ```{r class.source = 'fold-hide', echo = FALSE, message = FALSE, warning = FALSE}
 metadata_annotatedbyCaleb <- read_xlsx(path = "C:/Users/huyng/OneDrive - Toronto Metropolitan University (TMU)/Arson manuscript/metadata_withcompression_featureelimination_Caleb.xlsx")
 
@@ -1733,20 +1744,22 @@ metadata_annotatedbyCaleb$Chemical_group <- as.factor(metadata_annotatedbyCaleb$
 
 ## ** Left subplot: Percentage composition of each chemical group -----------
 chemical_group_counts <- metadata_annotatedbyCaleb %>%
-  group_by(Chemical_group) %>%
+  dplyr::mutate(Chemical_group = gsub(x= Chemical_group, pattern = "unknown", replacement = "ungrouped", fixed = TRUE)) %>%
+  dplyr::group_by(Chemical_group) %>%
   summarise(Count = n()) %>%
-  mutate(Percentage = (Count / sum(Count)) * 100)
+  dplyr::mutate(Percentage = (Count / sum(Count)) * 100)
 
 p1 <- ggplot(chemical_group_counts, aes(x = reorder(Chemical_group, -Percentage), 
-                                        y = Percentage, fill = Chemical_group)) +
+                                        y = Percentage, fill = reorder(Chemical_group, -Percentage) # Chemical_group
+                                        )) +
   geom_bar(stat = "identity", width = 0.7) +
   labs(x = "Chemical Group", y = "Percentage composition of chemical groups (%)") + # , title = "Percentage Composition of Chemical Groups") +
   theme_classic(base_size = 25) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),
         legend.position = "none")
+p1
 
-
-## **Right subplot: Mean and standard deviation of values (from column 7 onward) ----------
+## **Right subplot: horizontal stacked bar plot of signal intensity across gas stations of each chemical group in metadata ----------
 data_long <- metadata_annotatedbyCaleb %>%
   dplyr::select(Chemical_group, everything()) %>%
   pivot_longer(cols = 9:ncol(metadata_annotatedbyCaleb), names_to = "Sample_name", values_to = "Value") %>%
@@ -1759,14 +1772,15 @@ data_long <- metadata_annotatedbyCaleb %>%
                                                                  ifelse(str_detect(Sample_name, "F007"), "Station 7",
                                                                         ifelse(str_detect(Sample_name, "F008"), "Station 8",
                                                                                ifelse(str_detect(Sample_name, "F009"), "Station 9", "Station 10")))))))))) %>%
-  dplyr::filter(Chemical_group %notin% "unknown") %>%
+  dplyr::mutate(Chemical_group = gsub(x= Chemical_group, pattern = "unknown", replacement = "ungrouped", fixed = TRUE)) %>%
+  # dplyr::filter(Chemical_group %notin% "unknown") %>%
   group_by(gas_station, Chemical_group) %>%
   summarise(Value = sum(Value, na.rm=TRUE), .groups = "drop") %>% 
   mutate(
-    Chemical_group = factor(Chemical_group, levels = c("Alkane", "Cycloalkane", "Branched Alkane",
-                                                       "Aromatics", "BTEX", "Alkene", "Castle Group",
-                                                       "Gang of Four", "Indane", "PAHs-Naphthalene"))
-  ) %>%
+    Chemical_group = factor(Chemical_group, levels = levels(reorder(chemical_group_counts$Chemical_group, -chemical_group_counts$Percentage)))) %>% # c("Alkane", "Cycloalkane", "Branched Alkane",
+                                                       # "Aromatics", "BTEX", "Alkene", "Castle Group",
+                                                       # "Gang of Four", "Indane", "PAHs-Naphthalene"))
+  # ) %>%
   mutate(
     gas_station = factor(gas_station, levels = c("Station 1", "Station 2", "Station 3", "Station 4",
                                                  "Station 5", "Station 6", "Station 7", "Station 8",
@@ -1778,7 +1792,7 @@ p2 <- ggplot(data_long,
              aes(x = Value, y = gas_station, fill = Chemical_group)) +
   geom_col(position = "fill") +
   scale_x_continuous(labels = scales::percent_format()) +
-  labs(x = "Proportion of total signal intensity (%)", y = "Gas Station", fill = "Chemical Group") +
+  labs(x = "Proportion of total peak area (%)", y = "Gas Station", fill = "Chemical Group") +
   theme_minimal(base_size = 25) +
   theme(
     # axis.title.y = element_text(
@@ -1797,11 +1811,13 @@ p2 <- ggplot(data_long,
   # theme_classic(base_size = 18) +
   # theme(axis.text.x = element_text(angle = 45, hjust = 1),
   #       legend.position = "none")
+p2
 
 # Combine plots using gridExtra
-figure1 <- grid.arrange(p1, p2, ncol = 2, widths = c(1,2))
-ggsave(filename = paste0("figure1_", format(Sys.time(), "%d-%m-%Y"),".png"), 
-       plot = figure1, 
+figure2 <- grid.arrange(p1, p2, ncol = 2, widths = c(1,2))
+figure2
+ggsave(filename = paste0("figure2_", format(Sys.time(), "%d-%m-%Y"),".png"), 
+       plot = figure2, 
        device = "png",
        dpi = 600,        # Set DPI to 600
        width = 20,       # Width in inches (adjust as needed)
@@ -1887,83 +1903,118 @@ ggsave(filename = paste0("Stacked_barplot_", format(Sys.time(), "%d-%m-%Y"),".pn
        units = "in") 
 ```
 
-# Figure 2. Box plot of chemical groups of from Figure 1 in different gas stations - Before versus After best imp/norm with 6 SUBPLOTS - Picking out 3 gas stations that have the best consistency in imp/norm
+# Figure 3. Box plot of chemical groups of from Figure 1 in different gas stations - Before versus After best imp/norm with 6 SUBPLOTS - Picking out 3 gas stations that have the best consistency in imp/norm
 
 ```{r class.source = 'fold-hide', echo = FALSE, message = FALSE, warning = FALSE}
 # Before normalization ---------------
-plotdf1 <- metadata_annotatedbyCaleb %>% 
-  dplyr::select(-c("RT1", "RT2", "Ion1", "Ion2", 
-                   "Stauffer_chemical_group", "Stauffer_compound_name")) %>%
-  pivot_longer(cols = 3:ncol(.), 
-               names_to = "Sample_name", 
-               values_to = "Peak_Area") %>%
+data_long <- metadata_annotatedbyCaleb %>%
+  dplyr::select(Chemical_group, everything()) %>%
+  pivot_longer(cols = 9:ncol(metadata_annotatedbyCaleb), names_to = "Sample_name", values_to = "Value") %>%
+  mutate(gas_station = ifelse(str_detect(Sample_name, "F001"), "Station 1",
+                              ifelse(str_detect(Sample_name, "F002"), "Station 2",
+                                     ifelse(str_detect(Sample_name, "F003"), "Station 3",
+                                            ifelse(str_detect(Sample_name, "F004"), "Station 4",
+                                                   ifelse(str_detect(Sample_name, "F005"), "Station 5",
+                                                          ifelse(str_detect(Sample_name, "F006"), "Station 6",
+                                                                 ifelse(str_detect(Sample_name, "F007"), "Station 7",
+                                                                        ifelse(str_detect(Sample_name, "F008"), "Station 8",
+                                                                               ifelse(str_detect(Sample_name, "F009"), "Station 9", "Station 10")))))))))) %>%
+  dplyr::mutate(Chemical_group = gsub(x= Chemical_group, pattern = "unknown", replacement = "ungrouped", fixed = TRUE)) %>%
+  # dplyr::filter(Chemical_group %notin% "unknown") %>%
+  group_by(gas_station, Chemical_group) %>%
+  summarise(Value = sum(Value, na.rm=TRUE), .groups = "drop") %>% 
   mutate(
-    sampling_season = case_when(
-      str_detect(Sample_name, "b") ~ "blue",
-      str_detect(Sample_name, "p") ~ "purple",
-      TRUE ~ "orange"
-    ),
-    # Extract station number if pattern F00[1-9] is found, else default to 10
-    gas_station = ifelse(
-      str_detect(Sample_name, "F00[1-9]"),
-      paste("Station", str_remove(str_extract(Sample_name, "F00[1-9]"), "F00")),
-      "Station 10"
-    )
-  ) %>%
-  # Factor the gas_station with levels Station 1 to Station 10
-  mutate(gas_station = factor(gas_station, levels = paste0("Station ", 1:10)))
-
-plot_list <- list()
-i <- 1
-for (variable in c("Station 3", "Station 7")) { # sort(unique(plotdf1$gas_station))) {
-  plot_df <- plotdf1 %>%
-    dplyr::filter(Chemical_group %notin% "unknown") %>%
-    dplyr::filter(gas_station %in% variable) %>%
-    mutate(
-    Chemical_group = factor(Chemical_group, levels = c("Alkane", "Cycloalkane", "Branched Alkane",
-                                                       "Aromatics", "BTEX", "Alkene", "Castle Group",
-                                                       "Gang of Four", "Indane", "PAHs-Naphthalene"))
+    Chemical_group = factor(Chemical_group, levels = levels(reorder(chemical_group_counts$Chemical_group, -chemical_group_counts$Percentage)))) %>% 
+  mutate(
+    gas_station = factor(gas_station, levels = c("Station 1", "Station 2", "Station 3", "Station 4",
+                                                 "Station 5", "Station 6", "Station 7", "Station 8",
+                                                 "Station 9", "Station 10"))
   )
-  
-  plot_list[[i]] <- ggplot(data = plot_df, aes(x = Chemical_group, y = Peak_Area)) +
-    geom_boxplot(aes(fill = Chemical_group), position = "dodge") +
-    labs(title = variable,
-         x = "", 
-         y = "") +
-    theme_classic(base_size = 25) +
-    theme(axis.text.x = element_text(angle = 90, hjust = 0.5, vjust = 0.25,
-                                     size = 12, face = "bold"),
-          axis.ticks.length.x = unit(0, "cm"),
-          legend.position = "hidden",
-          plot.title = element_text(hjust = 0.5),
-          panel.grid = element_blank()
-    ) + 
-    scale_y_continuous(expand = c(0,0), limits = c(0, max(plotdf1$Peak_Area, na.rm = TRUE)))
-  i <- i + 1
-}
 
-y <- textGrob("Peak Area", rot = 90, gp = gpar(fontsize = 20))
-x <- textGrob("Feature", gp = gpar(fontsize = 20))
 
-stauffer_boxplot <- grid.arrange(grobs = plot_list, ncol = 2, nrow = 1, left = y, bottom = x)
+plot1 <- ggplot(data_long,
+             aes(x = Value, y = gas_station, fill = Chemical_group)) +
+  geom_col(position = "fill") +
+  scale_x_continuous(labels = scales::percent_format()) +
+  labs(x = "", y = "", fill = "Chemical Group") +
+  theme_minimal(base_size = 25) +
+  theme(
+    axis.ticks.length.y = unit(0, "cm"),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(), legend.position = "hidden"
+  )
+plot1
 
-ggsave(filename = paste0("Box_plot_RawPA","_chemicalgroup_by gas station", format(Sys.time(), "%d-%m-%Y"),".png"), 
-       plot = stauffer_boxplot, 
-       device = "png",
-       dpi = 600,        # Set DPI to 600
-       width = 20,       # Width in inches (adjust as needed)
-       height = 8,       # Height in inches (adjust as needed)
-       units = "in") 
+# plotdf1 <- metadata_annotatedbyCaleb %>% 
+#   dplyr::select(-c("RT1", "RT2", "Ion1", "Ion2", 
+#                    "Stauffer_chemical_group", "Stauffer_compound_name")) %>%
+#   pivot_longer(cols = 3:ncol(.), 
+#                names_to = "Sample_name", 
+#                values_to = "Peak_Area") %>%
+#   mutate(
+#     sampling_season = case_when(
+#       str_detect(Sample_name, "b") ~ "blue",
+#       str_detect(Sample_name, "p") ~ "purple",
+#       TRUE ~ "orange"
+#     ),
+#     # Extract station number if pattern F00[1-9] is found, else default to 10
+#     gas_station = ifelse(
+#       str_detect(Sample_name, "F00[1-9]"),
+#       paste("Station", str_remove(str_extract(Sample_name, "F00[1-9]"), "F00")),
+#       "Station 10"
+#     )
+#   ) %>%
+#   # Factor the gas_station with levels Station 1 to Station 10
+#   mutate(gas_station = factor(gas_station, levels = paste0("Station ", 1:10)))
+# 
+# plot_list <- list()
+# i <- 1
+# for (variable in c("Station 3", "Station 7")) { # sort(unique(plotdf1$gas_station))) {
+#   plot_df <- plotdf1 %>%
+#     dplyr::filter(Chemical_group %notin% "unknown") %>%
+#     dplyr::filter(gas_station %in% variable) %>%
+#     mutate(
+#     Chemical_group = factor(Chemical_group, levels = c("Alkane", "Cycloalkane", "Branched Alkane",
+#                                                        "Aromatics", "BTEX", "Alkene", "Castle Group",
+#                                                        "Gang of Four", "Indane", "PAHs-Naphthalene"))
+#   )
+#   
+#   plot_list[[i]] <- ggplot(data = plot_df, aes(x = Chemical_group, y = Peak_Area)) +
+#     geom_boxplot(aes(fill = Chemical_group), position = "dodge") +
+#     labs(title = variable,
+#          x = "", 
+#          y = "") +
+#     theme_classic(base_size = 25) +
+#     theme(axis.text.x = element_text(angle = 90, hjust = 0.5, vjust = 0.25,
+#                                      size = 12, face = "bold"),
+#           axis.ticks.length.x = unit(0, "cm"),
+#           legend.position = "hidden",
+#           plot.title = element_text(hjust = 0.5),
+#           panel.grid = element_blank()
+#     ) + 
+#     scale_y_continuous(expand = c(0,0), limits = c(0, max(plotdf1$Peak_Area, na.rm = TRUE)))
+#   i <- i + 1
+# }
+# 
+# y <- textGrob("Peak Area", rot = 90, gp = gpar(fontsize = 20))
+# x <- textGrob("Feature", gp = gpar(fontsize = 20))
+# 
+# stauffer_boxplot <- grid.arrange(grobs = plot_list, ncol = 2, nrow = 1, left = y, bottom = x)
+
+# ggsave(filename = paste0("Box_plot_RawPA","_chemicalgroup_by gas station", format(Sys.time(), "%d-%m-%Y"),".png"), 
+#        plot = stauffer_boxplot, 
+#        device = "png",
+#        dpi = 600,        # Set DPI to 600
+#        width = 20,       # Width in inches (adjust as needed)
+#        height = 8,       # Height in inches (adjust as needed)
+#        units = "in") 
 
 # After normalization -----------
 data <- input_rf
-train_proportion = 0.66
 type_col = "gas_station"
 remove_cols = c("sampling_season", "supplier", "Octane_rating")
-group_for_significance = "gas_station"
-metadata = core_metadata
-target_comp = target_comp
-start_col_index = 5
 data[[type_col]] <- as.factor(data[[type_col]])
 levels(data[[type_col]]) <- make.names(levels(data[[type_col]]), unique=TRUE)
 
@@ -1981,78 +2032,118 @@ rownames(data) <- paste0(rownames(data), "_", data$supplier)
 numeric_cols <- names(which(sapply(data, is.numeric)))
 numeric_cols <- setdiff(numeric_cols, c(remove_cols, type_col))
 
-best_res <- find_best_impute_normalize_new(
-  data,
-  type_col = type_col,
-  remove_cols = remove_cols,
-  group_for_significance = group_for_significance, 
-  train_proportion = train_proportion,
-  split_with_miscunknown_supplier = split_with_miscunknown_supplier,
-  metadata = metadata,
-  target_comp = target_comp,
-  start_col_index = start_col_index)
-
-best_imp  <- best_res$best_combo$Imputation
-best_norm <- best_res$best_combo$Normalization
-
 X_original   <- data[, numeric_cols, drop = FALSE]
-X_imputed    <- imputation_methods[[best_imp]](X_original)
-X_final      <- normalization_methods[[best_norm]](X_imputed)
+X_imputed    <- imputation_methods[["impute_random_uniform"]](X_original)
+X_final      <- normalization_methods[["Percentage_Normalization"]](X_imputed)
 data[, numeric_cols] <- X_final
 
-# Plotting
-plotdf2 <- data %>%
-  pivot_longer(cols = 5:ncol(.), 
-               names_to = "Feature", 
-               values_to = "Peak_Area") %>%
-  dplyr::mutate(Feature = as.numeric(Feature)) %>%
-  mutate(gas_station = gsub(".", " ", gas_station, fixed = TRUE)) %>%
-  mutate(gas_station = factor(gas_station, levels = paste0("Station ", 1:10)))
 
-plotdf2_new <- left_join(plotdf2,
-                     metadata_annotatedbyCaleb %>% 
-                       dplyr::select(c("Feature", "Chemical_group")), by = "Feature")
-
-plot_list2 <- list()
-i <- 1
-for (variable in c("Station 3", "Station 7")) { # sort(unique(plotdf2_new$gas_station))) {
-  plot_df <- plotdf2_new %>%
-    dplyr::filter(Chemical_group %notin% "unknown") %>%
-    dplyr::filter(gas_station %in% variable) %>%
-    mutate(
-    Chemical_group = factor(Chemical_group, levels = c("Alkane", "Cycloalkane", "Branched Alkane",
-                                                       "Aromatics", "BTEX", "Alkene", "Castle Group",
-                                                       "Gang of Four", "Indane", "PAHs-Naphthalene"))
+plotdf2 <- left_join(data %>% 
+            pivot_longer(cols = 5:ncol(.), names_to = "Feature", values_to = "Value"), 
+          metadata_annotatedbyCaleb %>% 
+            mutate(Feature = as.character(Feature)) %>% 
+            dplyr::mutate(Chemical_group = gsub(x= Chemical_group, pattern = "unknown", replacement = "ungrouped", fixed = TRUE))
+          , by = "Feature") %>%
+  group_by(gas_station, Chemical_group) %>%
+  summarise(Value = sum(Value, na.rm=TRUE), .groups = "drop") %>% 
+  mutate(
+    Chemical_group = factor(Chemical_group, levels = levels(reorder(chemical_group_counts$Chemical_group, -chemical_group_counts$Percentage)))) %>% 
+  dplyr::mutate(gas_station = gsub(x=gas_station, replacement = " ", pattern =".", fixed=TRUE)) %>%
+  mutate(
+    gas_station = factor(gas_station, levels = c("Station 1", "Station 2", "Station 3", "Station 4",
+                                                 "Station 5", "Station 6", "Station 7", "Station 8",
+                                                 "Station 9", "Station 10"))
   )
-  
-  plot_list2[[i]] <- ggplot(data = plot_df, aes(x = Chemical_group, y = Peak_Area)) +
-    geom_boxplot(aes(fill = Chemical_group), position = "dodge") +
-    labs(title = variable,
-         x = "", 
-         y = "") +
-    theme_classic(base_size = 25) +
-    theme(axis.text.x = element_text(angle = 90, hjust = 0.5, vjust = 0.25,
-                                     size = 12, face = "bold"),
-          axis.ticks.length.x = unit(0, "cm"),
-          legend.position = "hidden",
-          plot.title = element_text(hjust = 0.5),
-          panel.grid = element_blank()
-    ) + 
-    scale_y_continuous(expand = c(0,0), limits = c(0, max(plotdf2$Peak_Area, na.rm = TRUE)))
-  i <- i + 1
-}
 
-y <- textGrob("Normalized Peak Area", rot = 90, gp = gpar(fontsize = 20))
-x <- textGrob("Feature", gp = gpar(fontsize = 20))
+plot2 <- ggplot(plotdf2,
+             aes(x = Value, y = gas_station, fill = Chemical_group)) +
+  geom_col(position = "fill") +
+  scale_x_continuous(labels = scales::percent_format()) +
+  labs(x = "Proportion of total peak area (%)", y = "Gas Station", fill = "Chemical Group") +
+  theme_minimal(base_size = 25) +
+  theme(
+    axis.ticks.length.y = unit(0, "cm"),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(), legend.position = "hidden"
+  )
+plot2
 
-stauffer_boxplot2 <- grid.arrange(grobs = plot_list2, ncol = 2, nrow = 1, left = y, bottom = x)
+legend <- cowplot::get_legend(ggplot(plotdf2,
+             aes(x = Value, y = gas_station, fill = Chemical_group)) +
+  geom_col(position = "fill") +
+  scale_x_continuous(labels = scales::percent_format()) +
+  labs(x = "", y = "", fill = "Chemical Group") +
+  theme_minimal(base_size = 25) +
+  theme(
+    axis.ticks.length.y = unit(0, "cm"),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(), legend.position = "right"
+  ))
 
-ggsave(filename = paste0("Box_plot_NormalizedPA","_chemicalgroup_by gas station", format(Sys.time(), "%d-%m-%Y"),".png"), 
-       plot = stauffer_boxplot2, 
+y <- textGrob("Gas Station", rot = 90, gp = gpar(fontsize = 20))
+x <- textGrob("Proportion of total peak area (%)", gp = gpar(fontsize = 20))
+
+figure3 <- grid.arrange(plot1, plot2, ncol = 2, widths = c(1,1), right = legend) #, left = y, bottom = x)
+figure3
+
+# Plotting
+# plotdf2 <- data %>%
+#   pivot_longer(cols = 5:ncol(.), 
+#                names_to = "Feature", 
+#                values_to = "Peak_Area") %>%
+#   dplyr::mutate(Feature = as.numeric(Feature)) %>%
+#   mutate(gas_station = gsub(".", " ", gas_station, fixed = TRUE)) %>%
+#   mutate(gas_station = factor(gas_station, levels = paste0("Station ", 1:10)))
+# 
+# plotdf2_new <- left_join(plotdf2,
+#                      metadata_annotatedbyCaleb %>% 
+#                        dplyr::select(c("Feature", "Chemical_group")), by = "Feature")
+# 
+# plot_list2 <- list()
+# i <- 1
+# for (variable in c("Station 3", "Station 7")) { # sort(unique(plotdf2_new$gas_station))) {
+#   plot_df <- plotdf2_new %>%
+#     dplyr::filter(Chemical_group %notin% "unknown") %>%
+#     dplyr::filter(gas_station %in% variable) %>%
+#     mutate(
+#     Chemical_group = factor(Chemical_group, levels = c("Alkane", "Cycloalkane", "Branched Alkane",
+#                                                        "Aromatics", "BTEX", "Alkene", "Castle Group",
+#                                                        "Gang of Four", "Indane", "PAHs-Naphthalene"))
+#   )
+#   
+#   plot_list2[[i]] <- ggplot(data = plot_df, aes(x = Chemical_group, y = Peak_Area)) +
+#     geom_boxplot(aes(fill = Chemical_group), position = "dodge") +
+#     labs(title = variable,
+#          x = "", 
+#          y = "") +
+#     theme_classic(base_size = 25) +
+#     theme(axis.text.x = element_text(angle = 90, hjust = 0.5, vjust = 0.25,
+#                                      size = 12, face = "bold"),
+#           axis.ticks.length.x = unit(0, "cm"),
+#           legend.position = "hidden",
+#           plot.title = element_text(hjust = 0.5),
+#           panel.grid = element_blank()
+#     ) + 
+#     scale_y_continuous(expand = c(0,0), limits = c(0, max(plotdf2$Peak_Area, na.rm = TRUE)))
+#   i <- i + 1
+# }
+# 
+# y <- textGrob("Normalized Peak Area", rot = 90, gp = gpar(fontsize = 20))
+# x <- textGrob("Feature", gp = gpar(fontsize = 20))
+# 
+# stauffer_boxplot2 <- grid.arrange(grobs = plot_list2, ncol = 2, nrow = 1, left = y, bottom = x)
+
+
+ggsave(filename = paste0("figure3_Duel_horizontal-stacked-bar-plot_before and after imp-norm","_chemicalgroup_by gas station", format(Sys.time(), "%d-%m-%Y"),".png"), 
+       plot = figure3, 
        device = "png",
        dpi = 600,        # Set DPI to 600
        width = 20,       # Width in inches (adjust as needed)
-       height = 8,       # Height in inches (adjust as needed)
+       height = 12,       # Height in inches (adjust as needed)
        units = "in") 
 ```
 
@@ -2562,18 +2653,361 @@ resolutions <- c(resolutions, avg_resolution)
 print(resolutions)
 ```
 
+# Recursive Feature Addition
+```{r class.source = 'fold-hide', echo = FALSE, message = FALSE, warning = FALSE}
+recursive_feature_addition <- function(X_train, y_train,
+                                       X_test,  y_test,
+                                       cv_ctrl,
+                                       ntree_candidates,
+                                       metric) {
+  # 1) Fit full model to get initial feature importance
+  full_res <- tune_rf_subset(
+    X_train, y_train,
+    X_test,  y_test,
+    cv_ctrl, ntree_candidates, metric
+  )
+  # Extract importance from the randomForest final model
+  imp_mat <- importance(full_res$model$finalModel)
+  # Choose first top feature by MeanDecreaseAccuracy (or use MeanDecreaseGini) to use as base feature to initiate RFA
+  init_feat <- rownames(imp_mat)[which.max(imp_mat[, "MeanDecreaseAccuracy"])]
+
+  # Initialize feature sets
+  best_feats <- init_feat
+  remaining  <- setdiff(colnames(X_train), best_feats)
+
+  # 2) Baseline performance with the single top feature
+  base_res      <- tune_rf_subset(
+    X_train[, best_feats, drop = FALSE], y_train,
+    X_test [, best_feats, drop = FALSE], y_test,
+    cv_ctrl, ntree_candidates, metric
+  )
+  best_accuracy <- base_res$Accuracy
+  best_kappa    <- base_res$Kappa
+  best_auc      <- base_res$AUC
+
+  # 3) Iterative addition of remaining features
+  while(length(remaining) > 0) {
+    improved <- FALSE
+    for(feat in remaining) {
+      trial_feats <- c(best_feats, feat)
+      res <- tune_rf_subset(
+        X_train[, trial_feats, drop = FALSE], y_train,
+        X_test [, trial_feats, drop = FALSE], y_test,
+        cv_ctrl, ntree_candidates, metric
+      )
+      # Add feature only if all three metrics improve
+      if(res$Accuracy > best_accuracy &&
+         res$Kappa    > best_kappa    &&
+         res$AUC      > best_auc) {
+        best_accuracy <- res$Accuracy
+        best_kappa    <- res$Kappa
+        best_auc      <- res$AUC
+        best_feats    <- trial_feats
+        improved      <- TRUE
+        break
+      }
+    }
+    # Drop the last-tested feature from remaining
+    remaining <- setdiff(remaining, feat)
+    if(!improved) break
+  }
+
+  # 4) Final model on the chosen feature set
+  final_res <- tune_rf_subset(
+    X_train[, best_feats, drop = FALSE], y_train,
+    X_test [, best_feats, drop = FALSE], y_test,
+    cv_ctrl, ntree_candidates, metric
+  )
+
+  # 5) Return performance and selected features
+  list(
+    best_accuracy    = final_res$Accuracy,
+    best_kappa =  final_res$Kappa,
+    best_auc = final_res$AUC,
+    best_features_rf = best_feats,
+    final_model      = final_res$model,
+    prob_matrix = final_res$p_m,
+    predictions = final_res$preds,
+    eval_metrics = final_res$eval_metrics
+  )
+}
+```
+
 # RANDOM FOREST
 ```{r , echo=FALSE, warning = FALSE, message=FALSE}
+# Recursive Feature Addition -------------
+recursive_feature_addition <- function(X_train, y_train,
+                                       X_test,  y_test,
+                                       cv_ctrl,
+                                       ntree_candidates,
+                                       metric) {
+  # 1) Fit full model to get initial feature importance
+  full_res <- tune_rf_subset(
+    X_train, y_train,
+    X_test,  y_test,
+    cv_ctrl, ntree_candidates, metric
+  )
+  # Extract importance from the randomForest final model
+  imp_mat <- importance(full_res$model$finalModel)
+  # Choose first top feature by MeanDecreaseAccuracy (or use MeanDecreaseGini) to use as base feature to initiate RFA
+  init_feat <- rownames(imp_mat)[which.max(imp_mat[, "MeanDecreaseAccuracy"])]
+
+  # Initialize feature sets
+  best_feats <- init_feat
+  remaining  <- setdiff(colnames(X_train), best_feats)
+
+  # 2) Baseline performance with the single top feature
+  base_res      <- tune_rf_subset(
+    X_train[, best_feats, drop = FALSE], y_train,
+    X_test [, best_feats, drop = FALSE], y_test,
+    cv_ctrl, ntree_candidates, metric
+  )
+  best_accuracy <- base_res$Accuracy
+  best_kappa    <- base_res$Kappa
+  best_auc      <- base_res$AUC
+
+  # 3) Iterative addition of remaining features
+  while(length(remaining) > 0) {
+    improved <- FALSE
+    for(feat in remaining) {
+      trial_feats <- c(best_feats, feat)
+      res <- tune_rf_subset(
+        X_train[, trial_feats, drop = FALSE], y_train,
+        X_test [, trial_feats, drop = FALSE], y_test,
+        cv_ctrl, ntree_candidates, metric
+      )
+      # Add feature only if all three metrics improve
+      if(res$Accuracy > best_accuracy &&
+         res$Kappa    > best_kappa    &&
+         res$AUC      > best_auc) {
+        best_accuracy <- res$Accuracy
+        best_kappa    <- res$Kappa
+        best_auc      <- res$AUC
+        best_feats    <- trial_feats
+        improved      <- TRUE
+        break
+      }
+    }
+    # Drop the last-tested feature from remaining
+    remaining <- setdiff(remaining, feat)
+    if(!improved) break
+  }
+
+  # 4) Final model on the chosen feature set
+  final_res <- tune_rf_subset(
+    X_train[, best_feats, drop = FALSE], y_train,
+    X_test [, best_feats, drop = FALSE], y_test,
+    cv_ctrl, ntree_candidates, metric
+  )
+
+  # 5) Return performance and selected features
+  list(
+    best_accuracy    = final_res$Accuracy,
+    best_kappa =  final_res$Kappa,
+    best_auc = final_res$AUC,
+    best_features_rf = best_feats,
+    final_model      = final_res$model,
+    prob_matrix = final_res$p_m,
+    predictions = final_res$preds,
+    eval_metrics = final_res$eval_metrics
+  )
+}
+
+#─────────────────────────────────────────────────────────────────────────────
+# Helper: retune mtry (based on subset size) + ntree for any train/test split
+tune_rf_subset <- function(X_train, y_train, X_test, y_test,
+                           cv_ctrl, ntree_candidates, metric) {
+  p <- ncol(X_train)
+  rf_grid <- expand.grid(
+    mtry = unique(pmax(1, c(floor(sqrt(p)), floor(log2(p)))))
+  )
+  
+  best_mod   <- NULL
+  best_val   <- -Inf
+  best_trees <- NA
+  
+  for(nt in ntree_candidates) {
+    set.seed(123) # set.seed(sample.int(999,1))
+    tmp <- caret::train(
+      x         = X_train,
+      y         = as.factor(y_train),
+      method    = "rf",
+      trControl = cv_ctrl,
+      tuneGrid  = rf_grid,
+      metric    = metric,
+      ntree     = nt,
+      importance= TRUE
+    )
+    this_val <- max(tmp$results[[metric]])
+    if(this_val > best_val) {
+      best_val   <- this_val
+      best_mod   <- tmp
+      best_trees <- nt
+    }
+  }
+  
+  preds    <- predict(best_mod, newdata = X_test, type = "raw")
+  prob_matrix <- as.matrix(predict(best_mod, newdata=X_test, type="prob"))
+  
+  eval_metrics_res <- eval_metrics(true_labels = y_test, 
+                                   prob_matrix = prob_matrix, 
+                                   pred_labels = preds)
+  
+  return(list(model    = best_mod,
+              ntree    = best_trees,
+              p_m = prob_matrix,
+              preds = preds,
+              eval_metrics = eval_metrics_res,
+              Accuracy = eval_metrics_res$Accuracy,
+              Kappa = eval_metrics_res$Kappa,
+              AUC = eval_metrics_res$AUC,
+              F1_Weighted = eval_metrics_res$F1_Weighted,
+              MCC          = eval_metrics_res$MCC_Multiclass
+  ))
+}
+
+#─────────────────────────────────────────────────────────────────────────────
+library(caret)
+library(pROC)
+
+eval_metrics <- function(true_labels, prob_matrix, pred_labels){
+  # 0) Ensure factor levels align
+  classes <- union(levels(true_labels), levels(pred_labels))
+  y_true <- factor(true_labels, levels = classes)
+  y_pred <- factor(pred_labels,  levels = classes)
+
+  # 1) Build the confusion‐matrix table
+  cm <- table(Actual = y_true, Predicted = y_pred)
+  N  <- sum(cm)                       # total samples
+  diag_cm <- diag(cm)
+
+  # 2) Accuracy
+  accuracy <- sum(diag_cm) / N
+
+  # 3) Cohen’s Kappa (via caret)
+  kappa <- tryCatch({
+    cm_obj <- confusionMatrix(y_pred, y_true)
+    as.numeric(cm_obj$overall["Kappa"])
+  }, error = function(e) NA)
+
+  # 4) One‐vs‐all multiclass AUC
+  auc <- tryCatch({
+    roc_obj <- multiclass.roc(response  = true_labels,
+                              predictor = prob_matrix)
+    as.numeric(roc_obj$auc)
+  }, error = function(e) NA)
+
+  # 5) Per‐class precision & recall
+  col_sums <- colSums(cm)   # predicted totals for each class
+  row_sums <- rowSums(cm)   # actual   totals for each class
+
+  precision_per_class <- ifelse(col_sums > 0,
+                                diag_cm / col_sums,
+                                0)        # no preds → p=0
+  recall_per_class    <- ifelse(row_sums > 0,
+                                diag_cm / row_sums,
+                                0)        # no actual → r=0
+
+  # 6) Per‐class F1 & weighted F1
+  f1_per_class <- ifelse(
+    (precision_per_class + recall_per_class) > 0,
+    2 * precision_per_class * recall_per_class /
+      (precision_per_class + recall_per_class),
+    0
+  )
+  support <- row_sums   # how many true examples of each class
+  f1_weighted <- sum(f1_per_class * support) / sum(support)
+
+  # 7) Multiclass MCC (Gorodkin’s formula)
+  t_i <- row_sums
+  p_j <- col_sums
+  c_val <- sum(diag_cm)         # sum of true positives
+  num   <- N * c_val - sum(t_i * p_j)
+  den   <- sqrt((N^2 - sum(t_i^2)) * (N^2 - sum(p_j^2)))
+  mcc   <- ifelse(den > 0, num / den, 0)
+
+  return(list(
+    Accuracy         = accuracy,
+    Kappa            = kappa,
+    AUC              = auc,
+    F1_Weighted      = f1_weighted,
+    MCC_Multiclass   = mcc
+  ))
+}
+
+####################################################
+##########        CONFUSION MATRIX       ###########
+####################################################
+conf_mat_plot <- function(y_test, preds, conf_mat_title, accuracy) {
+  # 1) Compute raw counts table: rows = treated labels, cols = predicted pristine labels
+  cm_tab <- table(
+    Actual    = as.character(y_test),
+    Predicted = as.character(preds)
+  )
+  
+  # 2) Turn it into a data.frame for ggplot
+  cm_df <- as.data.frame(cm_tab, stringsAsFactors = FALSE) %>%
+    dplyr::rename(Freq = Freq)
+  
+  # 3) Add total-per-row and percent-per-cell
+  cm_df$Total <- NA
+  cm_df$Percent <- NA
+  for (label in unique(cm_df$Actual)){
+    cm_df[which(cm_df$Actual == label),]$Total <- sum(cm_df[which(cm_df$Actual == label),]$Freq)
+  }
+  
+  cm_df <- cm_df %>%
+    mutate(
+      Percent = round(Freq / Total * 100, 2)
+    )
+  
+  
+  cm_df <- cm_df %>%
+    mutate(
+      Label = ifelse(Predicted == Actual,
+                     paste0(round(Percent,1),"%"),
+                     ""
+      )
+    )
+  
+  # 5) Plot
+  conf_mat <- ggplot(cm_df, aes(x = Predicted, y = Actual, fill = Percent)) +
+    geom_tile(color = "white") +
+    scale_fill_gradient(low = "white", high = "steelblue") + #, limits = c(0,1)) +
+    geom_text(aes(label = Percent), size = 5, show.legend = FALSE) +
+    # explicitly drop any size guide, keep only the fill (Recall) legend
+    guides(size = "none") +
+    labs(
+      title = paste0("Confusion Matrix | ", conf_mat_title),
+      subtitle = paste0(
+        sprintf("Overall linking accuracy: %.2f%%\n", accuracy) 
+        # # " Recall per treated class (N=", cm_df$Total[1], 
+        # " replicates each)"
+      ),
+      x = "Predicted Class",
+      y = "Actual Class",
+      fill = "Percentage of Classification (%)" # "Recall %"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      axis.text.x  = element_text(angle = 45, hjust = 1),
+      plot.title   = element_text(face = "bold", hjust = 0.5),
+      plot.subtitle= element_text(hjust = 0.5)
+    )
+  return(conf_mat)
+}
+
+#─────────────────────────────────────────────────────────────────────────────
+
 run_rf_analysis_arson <- function(data,
                                   type_col,
                                   remove_cols,
                                   train_proportion,
-                                  seed             = NULL,
+                                  seed             = 123,
                                   ntree_candidates = c(100, 500, 1000, 2500),
                                   metric           = "Accuracy",
                                   do_rfe           = FALSE,
                                   rfe_folds        = 5,
-                                  do_gbfe          = FALSE,  # <--- New Arg for Greedy Backward Feature Elim
                                   do_sig           = FALSE,
                                   do_rfa           = FALSE,
                                   do_impute_norm_screen = TRUE,
@@ -2583,17 +3017,7 @@ run_rf_analysis_arson <- function(data,
                                   metadata,
                                   target_comp,
                                   start_col_index) {
-  
-  acc_rfe <- NA
-  acc_sig <- NA
-  acc_gbfe <- NA
-  acc_rfa <- NA
-  prob_matrix <- NA
-  prob_matrix_opt <- NA
-  prob_matrix_gbfe <- NA
-  prob_matrix_recursive <- NA
-  prob_matrix_sig <- NA
-  
+
   # 0) Optional set seed
   if(!is.null(seed)) set.seed(seed)
   
@@ -2617,6 +3041,7 @@ run_rf_analysis_arson <- function(data,
   best_norm <- "No_normalization"
   if(do_impute_norm_screen){
     cat("\n### Screening best Imputation + Normalization combo ###\n")
+    start_time_imp_norm <- Sys.time()
     # Identify numeric columns from predictors (excluding remove_cols and target)
     numeric_cols <- names(which(sapply(data, is.numeric)))
     numeric_cols <- setdiff(numeric_cols, c(remove_cols, type_col))
@@ -2650,6 +3075,10 @@ run_rf_analysis_arson <- function(data,
   }
   
   cat("NAs after final imputation+normalization:", sum(is.na(data)), "\n")
+  end_time_imp_norm   <- Sys.time()
+  time_imp_norm      <- as.numeric(difftime(end_time_imp_norm,
+                                                  start_time_imp_norm, 
+                                                  units="secs"))
   
   # 3) Now proceed with your normal train/test code
   X <- data %>%
@@ -2657,47 +3086,14 @@ run_rf_analysis_arson <- function(data,
   
   y <- data[[type_col]]
   
-  if(split_with_miscunknown_supplier) {
-    cat("Splitting train/test with special condition for 'supplier'.\n")
-    ## Here we use only samples that are not Misc or Unknown as training and testing on Misc + Unknown + small portion of non-Misc/unknown samples
-    # Identify samples to force into the test set
-    special_idx <- which(data[[type_col]] %in% excluding_supplier)
-
-    # All other samples
-    remaining_idx <- setdiff(seq_len(nrow(data)), special_idx)
-
-    # Set seed for reproducibility if not provided
-    if(is.null(seed)) {
-      set.seed(sample.int(999,1))
-    }
-
-    # Split the remaining samples according to train_proportion
-    train_remaining <- createDataPartition(data[[type_col]][remaining_idx],
-                                           p = train_proportion, list=FALSE)
-    train_remaining_idx <- remaining_idx[train_remaining]
-    test_remaining_idx  <- setdiff(remaining_idx, train_remaining_idx)
-
-    # The test set is the union of the test_remaining and all the special samples
-    test_idx <- c(test_remaining_idx, special_idx)
-
-    X_train <- X[train_remaining_idx, ]
-    X_test  <- X[test_idx, ]
-    y_train <- y[train_remaining_idx]
-    y_test  <- y[test_idx]
-    y_train <- droplevels(y_train)
-    # Drop unused factor levels from y_train so that it doesn't contain
-    # levels "Miscellanous" or "unknown" that have no observations
-    
-  } else {
-    cat("\n### Using Original Train/Test Split ###\n")
-    
-    if(is.null(seed)) {
-      set.seed(sample.int(999, 1))
-    }
-    train_index <- caret::createDataPartition(y, p = train_proportion, list = FALSE)
-    train_data <- data[train_index, ]
-    test_data  <- data[-train_index, ]
-  }
+  
+  cat("\n### Using Original Train/Test Split ###\n")
+  
+  set.seed(123) # set.seed(sample.int(999, 1))
+  train_index <- caret::createDataPartition(y, p = train_proportion, list = FALSE)
+  train_data <- data[train_index, ]
+  test_data  <- data[-train_index, ]
+  
   
   # Drop unused factor levels after splitting
   train_data[[type_col]] <- droplevels(train_data[[type_col]])
@@ -2724,494 +3120,259 @@ run_rf_analysis_arson <- function(data,
   rf_grid         <- expand.grid(mtry = mtry_candidates)
   
   # 6) Grid search over (mtry, ntree)
-  best_model       <- NULL
-  best_metric_val  <- -Inf
-  best_trees       <- NA
+  cat("\n### Train/test with Full original features ###\n")
+  start_time_full_features <- Sys.time()
   
-  for(ntree in ntree_candidates){
-    set.seed(sample.int(999,1))
-    rf_fit <- caret::train(
-      x = X_train,
-      y = as.factor(y_train),
-      method    = "rf",
-      trControl = cv_ctrl,
-      tuneGrid  = rf_grid,
-      metric    = metric,
-      ntree     = ntree,
-      importance= TRUE
-    )
-    current_best <- max(rf_fit$results[[metric]])
-    if(current_best > best_metric_val){
-      best_metric_val <- current_best
-      best_model      <- rf_fit
-      best_trees      <- ntree
-    }
-  }
+  all_feats <- tune_rf_subset(
+    X_train, y_train, X_test, y_test,
+    cv_ctrl, ntree_candidates, metric
+  )
   
-  cat("Best Model Accuracy on training =", best_metric_val,
-      " with ntree =", best_trees,
-      " and mtry =", best_model$bestTune$mtry, "\n")
-  
-  # 7) Final model from best caret fit
-  final_rf <- best_model$finalModel
-  
-  # 8) Probability predictions on the hold-out test (Full Feature Set)
-  pred_prob_test <- predict(best_model, newdata=X_test, type="prob")
-  
-  # Add subcategory for reference
-  new_pred_df_test <- as.data.frame(pred_prob_test)
-  rownames(new_pred_df_test) <- rownames(X_test)
-  
-  # ---------- ADDITIONAL ACCURACY EVALUATION FOR FULL-FEATURE MODEL -----------
-  # Get class predictions
-  pred_class_test <- predict(best_model, newdata=X_test, type="raw") 
-  acc_full <- mean(as.character(pred_class_test) == as.character(y_test))
+  best_model_all_feats      <- all_feats$model$finalModel
+  acc_full        <- all_feats$Accuracy
   
   # --- Generate Heatmap (Full Features) ---
-  {
-    df_heatmap <- new_pred_df_test
-    # row_names <- as.character(df_heatmap$gas_station)
-    # new_row_names <- ave(row_names, row_names, FUN = function(x) {
-    #   if (length(x) > 1) {
-    #     paste0(x, "_rep", seq_along(x))
-    #   } else {
-    #     x
-    #   }
-    # })
-    # rownames(df_heatmap) <- new_row_names
-    # df_heatmap$gas_station <- NULL
-    
-    prob_matrix <- as.matrix(df_heatmap)
-    
-    pheatmap(
-      prob_matrix,
-      fontsize = 20,
-      fontsize_number = 30,
-      cluster_rows    = FALSE,
-      cluster_cols    = FALSE,
-      color           = viridis(100),
-      display_numbers = TRUE,
-      number_format   = "%.2f",
-      main = paste("Classification Probability (All Features) -", sprintf("| Test Accuracy: %.2f", acc_full)),
-      breaks = seq(0, 1, length.out = 101)
-    )
+  {prob_matrix_all_feats <- all_feats$p_m
+   conf_mat_all_feats <- conf_mat_plot(y_test, all_feats$preds, conf_mat_title = paste0("All Features - ", type_col), accuracy = acc_full) 
+    # pheatmap(
+    #   prob_matrix,
+    #   fontsize = 20,
+    #   fontsize_number = 30,
+    #   cluster_rows    = FALSE,
+    #   cluster_cols    = FALSE,
+    #   color           = viridis(100),
+    #   display_numbers = TRUE,
+    #   number_format   = "%.2f",
+    #   main = paste("Classification Probability (All Features) -", sprintf("| Test Accuracy: %.2f", acc_full)),
+    #   breaks = seq(0, 1, length.out = 101)
+    # )
   }
+  
+  eval_metrics_all_feats <- all_feats$eval_metrics
+  
+  end_time_full_features   <- Sys.time()
+  time_full_features       <- as.numeric(difftime(end_time_full_features,
+                                                  start_time_full_features, 
+                                                  units="secs"))
   
   # 9) Feature Importances
-  rf_importances         <- as.data.frame(final_rf$importance)
-  rf_importances$Feature <- rownames(rf_importances)
-  rf_importances         <- rf_importances[order(rf_importances$MeanDecreaseGini, decreasing=TRUE), ]
-  cat("\nTop Features by MeanDecreaseGini:\n")
-  print(head(rf_importances))
+  # rf_importances         <- as.data.frame(final_rf$importance)
+  # rf_importances$Feature <- rownames(rf_importances)
+  # rf_importances         <- rf_importances[order(rf_importances$MeanDecreaseGini, decreasing=TRUE), ]
   
-  # 10) (Optional) RFE with fixed hyperparams
-  final_rf_opt       <- NULL
-  rfe_results_fixed  <- NULL
-  rfe_selected_feats <- NULL
-  
-  if(do_rfe){
-    my_rfFuncs <- rfFuncs
-    my_rfFuncs$fit <- function(x, y, first, last, ...) {
-      randomForest(
-        x         = x,
-        y         = y,
-        mtry      = best_model$bestTune$mtry,
-        ntree     = best_trees,
-        importance= TRUE
-      )
-    }
-    rfe_ctrl_fixed <- rfeControl(
-      functions    = my_rfFuncs,
-      method       = "cv",
-      number       = rfe_folds,
-      repeats      = 1,
-      saveDetails  = TRUE,
-      returnResamp = "final"
+  # Significance-Based Feature Selection using pairwise tests
+  if(do_sig){
+    cat("\n### Train/test with Pair-wise features ###\n")
+    acc_sig <- NA; sig_feats <- NULL; final_sig_model <- NULL
+    start_time_sig <- Sys.time()
+    
+    pw <- pairwise_significance_tests_modified(
+      input_df        = data,
+      group_col       = group_for_significance,
+      start_col_index = start_col_index,
+      metadata        = metadata,
+      target_comp     = target_comp
     )
-    subset_sizes <- seq_len(ncol(X_train))
-    set.seed(sample.int(999,1))
-    rfe_results_fixed <- rfe(
+    
+    idx   <- which.max(sapply(pw$corrected,
+                              function(df) length(unique(df$Feature))))
+    feats0<- unique(pw$corrected[[idx]]$Feature)
+    sig_feats <- intersect(feats0, colnames(X_train))
+    if(length(sig_feats)>0) {
+      tmp_sig <- tune_rf_subset(
+        X_train[, sig_feats, drop=FALSE], y_train,
+        X_test [, sig_feats, drop=FALSE], y_test,
+        cv_ctrl, ntree_candidates, metric
+      )
+      acc_sig         <- tmp_sig$Accuracy
+      final_sig_model <- tmp_sig$model$finalModel
+    }
+
+    {prob_matrix_sig <- tmp_sig$p_m
+      conf_mat_sig <- conf_mat_plot(y_test, tmp_sig$preds, conf_mat_title = paste0("Pair-wise Significance-Based Features - ", type_col), accuracy = acc_sig)
+      # pheatmap(
+      #   prob_matrix_sig,
+      #   fontsize = 20,
+      #   fontsize_number = 30,
+      #   cluster_rows    = FALSE,
+      #   cluster_cols    = FALSE,
+      #   color           = viridis(100),
+      #   display_numbers = TRUE,
+      #   number_format   = "%.2f",
+      #   main = paste("Classification Probability (Pair-wise Significance-Based Features) -", sprintf("| Test Accuracy: %.2f", acc_sig)),
+      #   breaks = seq(0, 1, length.out = 101)
+      # )
+    }
+    
+    eval_metrics_sig <- tmp_sig$eval_metrics
+    
+    end_time_sig   <- Sys.time()
+    time_sig       <- as.numeric(difftime(end_time_sig, start_time_sig, units="secs"))
+  }
+  
+  
+  # Recursive Feature Addition
+  if(do_rfa){
+    cat("\n### Train/test with RFA features ###\n")
+    start_time_rfa <- Sys.time()
+    
+    rfa_res   <- recursive_feature_addition(
+      X_train, y_train,
+      X_test,  y_test,
+      cv_ctrl          = cv_ctrl,
+      ntree_candidates = ntree_candidates,
+      metric           = metric
+    )
+    
+    rfa_selected_feats <- rfa_res$best_features_rf
+    acc_rfa                 <- rfa_res$best_accuracy
+    final_rf_rfa            <- rfa_res$final_model$finalModel
+    
+    prob_matrix_rfa <- rfa_res$prob_matrix
+    
+    conf_mat_rfa <- conf_mat_plot(y_test, rfa_res$predictions, conf_mat_title = paste0("RFA Features - ", type_col), accuracy = acc_rfa)
+    
+    # {pheatmap(
+    #     prob_matrix_rfa,
+    #     fontsize = 20,
+    #     fontsize_number = 30,
+    #     cluster_rows    = FALSE,
+    #     cluster_cols    = FALSE,
+    #     color           = viridis(100),
+    #     display_numbers = TRUE,
+    #     number_format   = "%.2f",
+    #     main = paste("Classification Probability (Recursive Feature Addition) -", sprintf("| Test Accuracy: %.2f", acc_rfa)),
+    #     breaks = seq(0, 1, length.out = 101)
+    #   )
+    # }
+    
+    eval_metrics_rfa <- rfa_res$eval_metrics
+    
+    end_time_rfa   <- Sys.time()
+    time_rfa       <- as.numeric(difftime(end_time_rfa, start_time_rfa, units="secs"))
+  }
+  
+  # RFE with hyperparams retuning
+  if(do_rfe){
+    cat("\n### Train/test with RFE features ###\n")
+    acc_rfe <- NA; rfe_feats <- NULL; final_rfe_model <- NULL
+    start_time_rfe <- Sys.time()
+    
+    myFuncs <- rfFuncs
+    myFuncs$fit <- function(x, y, first, last, ...) {
+      res <- tune_rf_subset(
+        X_train = x, y_train = y,
+        X_test  = x, y_test  = y,
+        cv_ctrl, ntree_candidates, metric
+      )
+      res$model$finalModel
+    }
+    rfe_ctl <- rfeControl(
+      functions   = myFuncs,
+      method      = "cv",
+      number      = rfe_folds,
+      saveDetails = TRUE,
+      returnResamp= "final"
+    )
+    rfe_out <- rfe(
       x          = X_train,
       y          = y_train,
-      sizes      = subset_sizes,
-      rfeControl = rfe_ctrl_fixed
+      sizes      = seq_len(ncol(X_train)),
+      rfeControl = rfe_ctl
     )
-    cat("Best Subset Size =", rfe_results_fixed$bestSubset, "\n")
-    cat("Selected Features:\n")
-    print(rfe_results_fixed$optVariables)
-    rfe_selected_feats <- rfe_results_fixed$optVariables
+    rfe_feats <- rfe_out$optVariables
+    cat("RFE feats", rfe_feats)
     
-    # Train final model on that subset
-    X_train_opt  <- X_train[, rfe_selected_feats, drop=FALSE]
-    final_rf_opt <- randomForest(
-      x         = X_train_opt,
-      y         = y_train,
-      # ran with the same best mtry/ntree as the full features final model
-      mtry      = best_model$bestTune$mtry,
-      ntree     = best_trees,
-      importance=TRUE
+    # final retune+test on RFE set
+    tmp_rfe <- tune_rf_subset(
+      X_train[, rfe_feats, drop=FALSE], y_train,
+      X_test[, rfe_feats, drop=FALSE], y_test,
+      cv_ctrl, ntree_candidates, metric
     )
-    
-    # ---------- ADDITIONAL ACCURACY EVALUATION FOR RFE MODEL -----------
-    X_test_opt       <- X_test[, rfe_selected_feats, drop=FALSE]
-    pred_class_opt   <- predict(final_rf_opt, newdata=X_test_opt, type="response")
-    acc_rfe          <- mean(as.character(pred_class_opt) == as.character(y_test))
+    acc_rfe          <- tmp_rfe$Accuracy
+    final_rfe_model  <- tmp_rfe$model$finalModel
 
-    # Probability predictions (RFE)
-    pred_prob_test_opt <- predict(final_rf_opt, newdata=X_test_opt, type="prob")
-    new_pred_df_test_opt <- as.data.frame(pred_prob_test_opt)
-    rownames(new_pred_df_test_opt) <- rownames(X_test)
-    # new_pred_df_test_opt$gas_station <- y_test
-    
     # --- Generate Heatmap (RFE) ---
-    {
-      df_heatmap_opt <- new_pred_df_test_opt
-      # row_names_opt <- as.character(df_heatmap_opt$gas_station)
-      # new_row_names_opt <- ave(row_names_opt, row_names_opt, FUN = function(x) {
-      #   if (length(x) > 1) {
-      #     paste0(x, "_rep", seq_along(x))
-      #   } else {
-      #     x
-      #   }
-      # })
-      # rownames(df_heatmap_opt) <- new_row_names_opt
-      # df_heatmap_opt$gas_station <- NULL
-      
-      prob_matrix_opt <- as.matrix(df_heatmap_opt)
-      
-      pheatmap(
-        prob_matrix_opt,
-        fontsize = 20,
-        fontsize_number = 30,
-        cluster_rows    = FALSE,
-        cluster_cols    = FALSE,
-        color           = viridis(100),
-        display_numbers = TRUE,
-        number_format   = "%.2f",
-        main = paste("Classification Probability (RFE Features) -", sprintf("|  Test Accuracy: %.2f", acc_rfe)),
-        breaks = seq(0, 1, length.out = 101)
-      )
+    {prob_matrix_rfe <- tmp_rfe$p_m
+      conf_mat_rfe <-  conf_mat_plot(y_test, tmp_rfe$preds, conf_mat_title = paste0("RFE Features - ", type_col), accuracy = acc_rfe)
+      # pheatmap(
+      #   prob_matrix_rfe,
+      #   fontsize = 20,
+      #   fontsize_number = 30,
+      #   cluster_rows    = FALSE,
+      #   cluster_cols    = FALSE,
+      #   color           = viridis(100),
+      #   display_numbers = TRUE,
+      #   number_format   = "%.2f",
+      #   main = paste("Classification Probability (RFE Features) -", sprintf("|  Test Accuracy: %.2f", acc_rfe)),
+      #   breaks = seq(0, 1, length.out = 101)
+      # )
       
     }
-  }
-  
-  # 11) (Optional) Greedy Backward Feature Elimination (GBFE)
-  gbfe_selected_feats  <- colnames(X_train)
-  final_rf_gbfe        <- NULL
-  
-  if(do_gbfe){
-    cat("\n========== BEGIN GREEDY BACKWARD FEATURE ELIMINATION (GBFE) ==========\n")
     
-    # We'll compare every reduced subset's test accuracy to the full-feature baseline:
-    baseline_test_acc <- acc_full  # The test accuracy with ALL features
+    eval_metrics_rfe <- tmp_rfe$eval_metrics
     
-    current_features <- colnames(X_train)
-    improved         <- TRUE
-    
-    while(improved && length(current_features) > 1){
-      improved <- FALSE
-      
-      # Try removing each feature one at a time
-      for(feature_to_remove in current_features){
-        trial_features <- setdiff(current_features, feature_to_remove)
-        
-        # Train a model using the trial subset
-        set.seed(sample.int(999,1))
-        trial_model <- caret::train(
-          x         = X_train[, trial_features, drop=FALSE],
-          y         = y_train,
-          method    = "rf",
-          trControl = cv_ctrl,
-          metric    = metric,
-          # ran with the same best mtry/ntree as the full features final model
-          ntree     = best_trees,
-          tuneGrid  = data.frame(mtry = best_model$bestTune$mtry),
-          importance= TRUE
-        )
-        
-        # Check test accuracy with the trial subset
-        pred_trial <- predict(trial_model, newdata=X_test[, trial_features, drop=FALSE], type="raw")
-        trial_acc  <- mean(as.character(pred_trial) == as.character(y_test))
-        
-        # Remove the feature if test-accuracy is >= the full-feature baseline
-        if(trial_acc >= baseline_test_acc){
-          cat(sprintf(
-            "Removing feature '%s' (test acc: %.3f >= baseline: %.3f)\n",
-            feature_to_remove, trial_acc, baseline_test_acc
-          ))
-          # Update feature set
-          current_features <- trial_features
-          improved         <- TRUE
-          break  # remove one feature at a time, then re-check
-        }
-      }
-    }
-    
-    gbfe_selected_feats <- current_features
-    cat("\nFinal GBFE Selected Features:\n")
-    print(gbfe_selected_feats)
-    
-    # Train final model with the reduced feature set
-    final_rf_gbfe <- randomForest(
-      x         = X_train[, gbfe_selected_feats, drop=FALSE],
-      y         = y_train,
-      mtry      = best_model$bestTune$mtry,
-      ntree     = best_trees,
-      importance=TRUE
-    )
-    
-    # Evaluate on test
-    X_test_gbfe      <- X_test[, gbfe_selected_feats, drop=FALSE]
-    pred_class_gbfe  <- predict(final_rf_gbfe, newdata=X_test_gbfe, type="response")
-    acc_gbfe         <- mean(as.character(pred_class_gbfe) == as.character(y_test))
-    
-    # Probability predictions (GBFE)
-    pred_prob_test_gbfe <- predict(final_rf_gbfe, newdata=X_test_gbfe, type="prob")
-    new_pred_df_test_gbfe <- as.data.frame(pred_prob_test_gbfe)
-    rownames(new_pred_df_test_gbfe) <- rownames(X_test)
-    # new_pred_df_test_gbfe$gas_station <- y_test
-    
-    
-    # --- Generate Heatmap (GBFE) ---
-    {
-      df_heatmap_gbfe <- new_pred_df_test_gbfe
-      # row_names_gbfe <- as.character(df_heatmap_gbfe$gas_station)
-      # new_row_names_gbfe <- ave(row_names_gbfe, row_names_gbfe, FUN = function(x) {
-      #   if (length(x) > 1) {
-      #     paste0(x, "_rep", seq_along(x))
-      #   } else {
-      #     x
-      #   }
-      # })
-      # rownames(df_heatmap_gbfe) <- new_row_names_gbfe
-      # df_heatmap_gbfe$gas_station <- NULL
-      
-      prob_matrix_gbfe <- as.matrix(df_heatmap_gbfe)
-      
-      pheatmap(
-        prob_matrix_gbfe,
-        fontsize = 20,
-        fontsize_number = 30,
-        cluster_rows    = FALSE,
-        cluster_cols    = FALSE,
-        color           = viridis(100),
-        display_numbers = TRUE,
-        number_format   = "%.2f" ,
-        main = paste("Classification Probability (GBFE Features) -", sprintf("| Test Accuracy: %.2f", acc_gbfe)),
-        breaks = seq(0, 1, length.out = 101)
-      )
-      
-    }
-  }
-  
-  # 12) (Optional) Significance-Based Feature Selection using pairwise tests
-  final_rf_sig <- NULL
-  sig_selected_feats <- NULL
-  acc_sig <- NA
-  
-  if(do_sig){
-    cat("\n========== BEGIN SIGNIFICANCE-BASED FEATURE SELECTION ==========\n")
-    pairwise_results <- pairwise_significance_tests_modified(input_df = data,
-                                                             group_col = group_for_significance,
-                                                             start_col_index = start_col_index,
-                                                             metadata = metadata,
-                                                             target_comp = target_comp)
-    index <- which.max(sapply(pairwise_results$corrected, function(subdf) length(unique(subdf$Feature))))
-    sig_feats <- unique(pairwise_results$corrected[[index]]$Feature)
-    cat("Number of significant compounds (before filtering):", length(sig_feats), "\n")
-    # Ensure the significant features exist in X_train
-    sig_feats <- intersect(sig_feats, colnames(X_train))
-    cat("Number of significant compounds (after filtering):", length(sig_feats), "\n")
-    
-    if(length(sig_feats) == 0){
-      cat("No significant compounds found in the features. Skipping significance-based selection.\n")
-    } else {
-      sig_selected_feats <- sig_feats
-      set.seed(sample.int(999,1))
-      sig_model <- caret::train(
-        x = X_train[, sig_selected_feats, drop=FALSE],
-        y = y_train,
-        method = "rf",
-        trControl = cv_ctrl, # use the same k-fold cv as the full features model
-        # use best mtry and ntree from full features model
-        tuneGrid = data.frame(mtry = best_model$bestTune$mtry), 
-        ntree = best_trees,
-        importance = TRUE
-      )
-      final_rf_sig <- sig_model
-      
-      pred_class_sig <- predict(sig_model, newdata=X_test[, sig_selected_feats, drop=FALSE], type="raw")
-      acc_sig <- mean(as.character(pred_class_sig) == as.character(y_test))
-
-      
-      pred_prob_sig <- predict(sig_model, newdata=X_test[, sig_selected_feats, drop=FALSE], type="prob")
-      new_pred_df_test_sig <- as.data.frame(pred_prob_sig)
-      rownames(new_pred_df_test_sig) <- rownames(X_test)
-      # new_pred_df_test_sig$gas_station <- y_test
-      
-      {
-        df_heatmap_sig <- new_pred_df_test_sig
-        # row_names_sig <- as.character(df_heatmap_sig$gas_station)
-        # new_row_names_sig <- ave(row_names_sig, row_names_sig, FUN = function(x) {
-        #   if(length(x) > 1) paste0(x, "_rep", seq_along(x)) else x
-        # })
-        # rownames(df_heatmap_sig) <- new_row_names_sig
-        # df_heatmap_sig$gas_station <- NULL
-        prob_matrix_sig <- as.matrix(df_heatmap_sig)
-        
-        pheatmap(
-          prob_matrix_sig,
-          fontsize = 20,
-          fontsize_number = 30,
-          cluster_rows    = FALSE,
-          cluster_cols    = FALSE,
-          color           = viridis(100),
-          display_numbers = TRUE,
-          number_format   = "%.2f",
-          main = paste("Classification Probability (Pair-wise Significance-Based Features) -", sprintf("| Test Accuracy: %.2f", acc_sig)),
-          breaks = seq(0, 1, length.out = 101)
-        )
-        
-      }
-    }
-  }
-  
-  # 13) (Optional) Recursive Feature Addition
-  final_rf_rfa <- NULL
-  recursive_selected_feats <- NULL
-  acc_rfa <- NA
-  
-  if(do_rfa){
-    cat("\n========== BEGIN RECURSIVE FEATURE ADDITION ==========\n")
-    # Use the significant features from pairwise tests as the base features
-    pairwise_results <- pairwise_significance_tests_modified(input_df = data,
-                                                             group_col = group_for_significance,
-                                                             start_col_index = start_col_index,
-                                                             metadata = metadata,
-                                                             target_comp = target_comp)
-    base_features <- unique(pairwise_results$corrected[[1]]$Feature)
-    X <- data %>% dplyr::select(-c(all_of(remove_cols), all_of(type_col)))
-    y <- data[[type_col]]
-    
-    # base_features <- intersect(base_features, colnames(X_train))
-    cat("Number of base features for recursive addition:", length(base_features), "\n")
-    
-    best_score_rf_list <- numeric()
-    best_features_rf_list <- list()
-    
-    # using best mtry/ntree from full features model for RFA
-    for(i in 1:100){
-      result <- recursive_feature_addition(X, y, base_features = base_features,
-                                           train_proportion=train_proportion,
-                                           best_mtry=best_model$bestTune$mtry,
-                                           best_ntree=best_trees)
-      best_score_rf_list <- c(best_score_rf_list, result$best_score_rf)
-      best_features_rf_list[[i]] <- result$best_features_rf
-    }
-    
-    best_iter <- which.max(best_score_rf_list)
-    recursive_selected_feats <- best_features_rf_list[[best_iter]]
-    cat("Best Recursive Feature Addition Score:", best_score_rf_list[best_iter], "\n")
-    cat("Selected Features from Recursive Addition:\n")
-    print(recursive_selected_feats)
-    
-    # Ensure only valid features are used
-    recursive_selected_feats <- intersect(recursive_selected_feats, colnames(X_train))
-    
-    set.seed(sample.int(999,1))
-    recursive_model <- caret::train(
-      x = X_train[, recursive_selected_feats, drop=FALSE],
-      y = y_train,
-      method = "rf",
-      trControl = cv_ctrl,
-      tuneGrid = data.frame(mtry = best_model$bestTune$mtry),
-      ntree = best_trees,
-      importance = TRUE
-    )
-    final_rf_rfa <- recursive_model
-    
-    pred_class_recursive <- predict(recursive_model, newdata=X_test[, recursive_selected_feats, drop=FALSE], type="raw")
-    acc_rfa <- mean(as.character(pred_class_recursive) == as.character(y_test))
-
-    
-    pred_prob_recursive <- predict(recursive_model, newdata=X_test[, recursive_selected_feats, drop=FALSE], type="prob")
-    new_pred_df_test_recursive <- as.data.frame(pred_prob_recursive)
-    rownames(new_pred_df_test_recursive) <- rownames(X_test)
-    # new_pred_df_test_recursive$gas_station <- y_test
-    
-    {
-      df_heatmap_recursive <- new_pred_df_test_recursive
-      # row_names_recursive <- as.character(df_heatmap_recursive$gas_station)
-      # new_row_names_recursive <- ave(row_names_recursive, row_names_recursive, FUN = function(x) {
-      #   if (length(x) > 1) paste0(x, "_rep", seq_along(x)) else x
-      # })
-      # rownames(df_heatmap_recursive) <- new_row_names_recursive
-      # df_heatmap_recursive$gas_station <- NULL
-      prob_matrix_recursive <- as.matrix(df_heatmap_recursive)
-      
-      pheatmap(
-        prob_matrix_recursive,
-        fontsize = 20,
-        fontsize_number = 30,
-        cluster_rows    = FALSE,
-        cluster_cols    = FALSE,
-        color           = viridis(100),
-        display_numbers = TRUE,
-        number_format   = "%.2f",
-        main = paste("Classification Probability (Recursive Feature Addition) -", sprintf("| Test Accuracy: %.2f", acc_rfa)),
-        breaks = seq(0, 1, length.out = 101)
-      )
-      
-    }
+    end_time_rfe   <- Sys.time()
+    time_rfe       <- as.numeric(difftime(end_time_rfe, start_time_rfe, units="secs"))
   }
   
   cat("\nFull-Feature Balanced Test Accuracy:", acc_full, "\n")
   if(do_rfe) cat("\nRFE-Optimized Balanced Test Accuracy:", acc_rfe, "\n")
-  if(do_gbfe) cat("\nGBFE-Selected Balanced Test Accuracy:", acc_gbfe, "\n")
   if(do_sig) cat("\nPairwise Selected Features Balanced Test Accuracy:", acc_sig, "\n")
   if(do_rfa) cat("\nRecursive Feature Addition Test Accuracy:", acc_rfa, "\n")
 
   # Return a list of final results
   result_list <- list(
     final_imp_norm_dat    = data,
-    imp_norm_res_table    = best_res$results_table,
-    best_imputatation     = best_imp,
-    best_normalization    = best_norm,
-    best_caret_model      = best_model,
-    final_rf_all_feats    = final_rf,
-    full_features_acc     = acc_full,
-    rfe_model             = rfe_results_fixed,
-    final_rf_opt          = final_rf_opt,
-    rfe_selected_features = rfe_selected_feats,
-    gbfe_model            = final_rf_gbfe,
-    gbfe_selected_feats   = gbfe_selected_feats,
-    prob_matrix = prob_matrix
+    final_rf_all_feats      = best_model_all_feats,
+    prob_matrix_all_feats = prob_matrix_all_feats,
+    all_features_acc     = acc_full,
+    time_full_features = time_full_features,
+    eval_metrics_all_feats = eval_metrics_all_feats,
+    conf_mat_all_feats = conf_mat_all_feats
   )
   
+  if(do_impute_norm_screen) {
+    result_list$time_imp_norm <- time_imp_norm
+    result_list$imp_norm_res_table    <- best_res$results_table
+    result_list$best_imputatation     <-  best_imp
+    result_list$best_normalization    <- best_norm
+  }
+  
   if(do_sig){
-    result_list$sig_model    <- final_rf_sig
-    result_list$sig_selected_feats <- sig_selected_feats
-    result_list$acc_sig <- acc_sig
+    result_list$sig_model    <- final_sig_model
+    result_list$sig_selected_feats <- sig_feats
     result_list$prob_matrix_sig <- prob_matrix_sig
+    result_list$acc_sig <- acc_sig
+    result_list$time_sig          <- time_sig
+    result_list$eval_metrics_sig <- eval_metrics_sig
+    result_list$conf_mat_sig <- conf_mat_sig
   }
   
   if(do_rfa) {
-    result_list$prob_matrix_opt    <- prob_matrix_opt
+    result_list$rfa_model <- final_rf_rfa
+    result_list$rfa_selected_feats <- rfa_selected_feats
+    result_list$prob_matrix_rfa    <- prob_matrix_rfa
     result_list$acc_rfa  <- acc_rfa
-     result_list$recursive_selected_feats <- recursive_selected_feats
+    result_list$time_rfa                <- time_rfa
+    result_list$eval_metrics_rfa <- eval_metrics_rfa
+    result_list$conf_mat_rfa <- conf_mat_rfa
   } 
   if(do_rfe) {
-    result_list$prob_matrix_opt    <- prob_matrix_opt
+    result_list$rfe_model             <- rfe_out
+    result_list$final_rf_rfe          <- final_rfe_model
+    result_list$rfe_selected_features <- rfe_feats
+    result_list$prob_matrix_rfe    <- prob_matrix_rfe
     result_list$acc_rfe  <- acc_rfe
-  }
-  if(do_gbfe) {
-    result_list$prob_matrix_gbfe    <- prob_matrix_gbfe
-    result_list$acc_gbfe  <- acc_gbfe
+    result_list$time_rfe              <- time_rfe
+    result_list$eval_metrics_rfe <- eval_metrics_rfe
+    result_list$conf_mat_rfe <- conf_mat_rfe
   }
   
   return(result_list)
 }
 ```
+
 
 ```{r , echo=FALSE, warning = FALSE, message=FALSE}
 target_comp <- read_xlsx(path = paste0(getwd(), "/python/Shortened ILR Compound List PF001A 07-06-2024_Huy_modified_08Aug2024.xlsx"))
@@ -3293,7 +3454,6 @@ for (i in 1:10) {
                                                                      target_comp = target_comp,
                                                                      start_col_index = 5,
                                                                      do_rfe = TRUE,
-                                                                     do_gbfe = TRUE,
                                                                      do_sig = TRUE,
                                                                      do_rfa = TRUE)
     
@@ -3306,11 +3466,187 @@ for (i in 1:10) {
                                                                      target_comp = target_comp,
                                                                      start_col_index = 5,
                                                                      do_rfe = TRUE,
-                                                                     do_gbfe = TRUE,
                                                                      do_sig = TRUE,
                                                                      do_rfa = TRUE)
 }
+
+# Use these for final manuscript
+rf_results_by_gas_station_with_miscnunknown_rfe
+rf_results_by_gas_station_with_miscnunknown_sig_rfa
+rf_results_by_supplier_with_miscnunknown_rfe 
+rf_results_by_supplier_with_miscnunknown_sig_rfa 
+
+## Plot RFE-CV Accuracy against number of Variables
+# lattice::trellis.par.set(caret::caretTheme())
+rfe_cv_accuracy_plot <- plot(rf_results_by_supplier_with_miscnunknown_list[[4]]$rfe_model, 
+                             type = c("g", "o"),
+                             xlab = "Subset sizes")
+bigfont_plot <- update(
+  rfe_cv_accuracy_plot,
+  par.settings = list(
+    par.main.text  = list(cex = 2.2),
+    par.xlab.text  = list(cex = 1.6),
+    par.ylab.text  = list(cex = 1.6),
+    axis.text      = list(cex = 1.3),
+    par.strip.text = list(cex = 1.5)
+  )
+)
+png(
+  filename = paste0("Figure S3_RFE-CV Accuracy across different subset sizes_", "supplier_", format(Sys.time(), "%d-%m-%Y"),".png"),
+  width    = 20,      # in inches
+  height   = 8,       # in inches
+  units    = "in",    # interpret width/height as inches
+  res      = 300      # DPI
+)
+
+print(bigfont_plot)  # send the trellis object to the device
+dev.off()
+
+# SI Table S5-S7
+## Table S5: RFE
+metadata_annotatedbyCaleb[] %>%
+  dplyr::filter(Feature %in% as.numeric(rf_results_by_gas_station_with_miscnunknown_rfe$rfe_selected_features))
+
+
+## Table S6: Pairwise
+
+## Table S7: RFA
 ```
+
+####-----------------------------------------------#
+SUPPLIER
+$time_rfe
+[1] 19448.13
+
+$eval_metrics_rfe
+$eval_metrics_rfe$Accuracy
+Accuracy 
+     0.7 
+
+$eval_metrics_rfe$Kappa
+    Kappa 
+0.5774648 
+
+$eval_metrics_rfe$AUC
+[1] 0.8833333
+
+
+$acc_rfa
+Accuracy 
+     0.8 
+
+$time_rfa
+[1] 1430.785
+
+$eval_metrics_rfa
+$eval_metrics_rfa$Accuracy
+Accuracy 
+     0.8 
+
+$eval_metrics_rfa$Kappa
+    Kappa 
+0.7260274 
+
+$eval_metrics_rfa$AUC
+[1] 0.9166667
+
+$time_sig
+[1] 9.430778
+
+$eval_metrics_sig
+$eval_metrics_sig$Accuracy
+Accuracy 
+     0.6 
+
+$eval_metrics_sig$Kappa
+    Kappa 
+0.4871795 
+
+$eval_metrics_sig$AUC
+[1] 0.8916667
+
+
+$time_full_features
+[1] 21.50568
+
+$eval_metrics_full_features
+$eval_metrics_full_features$Accuracy
+Accuracy 
+     0.4 
+
+$eval_metrics_full_features$Kappa
+    Kappa 
+0.2105263 
+
+$eval_metrics_full_features$AUC
+[1] 0.8875
+####----------------------------------------------------------------------
+GAS STATION
+
+$time_full_features
+[1] 3.690251
+
+$eval_metrics_full_features
+$eval_metrics_full_features$Accuracy
+ Accuracy 
+0.5238095 
+
+$eval_metrics_full_features$Kappa
+    Kappa 
+0.4559585 
+
+$eval_metrics_full_features$AUC
+[1] 0.7839506
+
+
+$time_sig
+[1] 4.637569
+
+$eval_metrics_sig
+$eval_metrics_sig$Accuracy
+ Accuracy 
+0.4285714 
+
+$eval_metrics_sig$Kappa
+    Kappa 
+0.3454545 
+
+$eval_metrics_sig$AUC
+[1] 0.7916667
+
+$acc_rfa
+ Accuracy 
+0.6190476 
+
+$time_rfa
+[1] 532.4951
+
+$eval_metrics_rfa
+$eval_metrics_rfa$Accuracy
+ Accuracy 
+0.6190476 
+
+$eval_metrics_rfa$Kappa
+ Kappa 
+0.5625 
+
+$eval_metrics_rfa$AUC
+[1] 0.8734568
+
+$time_rfe
+[1] 1779.181
+
+$eval_metrics_rfe
+$eval_metrics_rfe$Accuracy
+ Accuracy 
+0.4761905 
+
+$eval_metrics_rfe$Kappa
+    Kappa 
+0.3984375 
+
+$eval_metrics_rfe$AUC
+[1] 0.7987654
 
 ## Figure 4: Boxplot of test accuracy across five feature selection methods
 ```{r , echo=FALSE, warning = FALSE, message=FALSE}
@@ -3320,15 +3656,15 @@ rfe_acc<- c()
 gbfe_acc<- c()
 sig_acc<- c()
 rfa_acc<- c()
-for (item in 1:length(rf_results_by_gas_station_with_miscnunknown_list)) {
-  full_features_acc <- c(full_features_acc, rf_results_by_gas_station_with_miscnunknown_list[[item]]$full_features_acc)
-  rfe_acc <- c(rfe_acc, rf_results_by_gas_station_with_miscnunknown_list[[item]]$acc_rfe)
-  gbfe_acc <- c(gbfe_acc, rf_results_by_gas_station_with_miscnunknown_list[[item]]$acc_gbfe)
-  sig_acc <- c(sig_acc, rf_results_by_gas_station_with_miscnunknown_list[[item]]$acc_sig)
-  rfa_acc <- c(rfa_acc, rf_results_by_gas_station_with_miscnunknown_list[[item]]$acc_rfa)
+for (item in 1:length(rf_results_by_supplier_with_miscnunknown_list)) {
+  full_features_acc <- c(full_features_acc, rf_results_by_supplier_with_miscnunknown_list[[item]]$full_features_acc)
+  rfe_acc <- c(rfe_acc, rf_results_by_supplier_with_miscnunknown_list[[item]]$acc_rfe)
+  gbfe_acc <- c(gbfe_acc, rf_results_by_supplier_with_miscnunknown_list[[item]]$acc_gbfe)
+  sig_acc <- c(sig_acc, rf_results_by_supplier_with_miscnunknown_list[[item]]$acc_sig)
+  rfa_acc <- c(rfa_acc, rf_results_by_supplier_with_miscnunknown_list[[item]]$acc_rfa)
 }
 
-
+# Make data frame of prediction accuracies
 df <- data.frame("Full_features" = full_features_acc,
                  "RFE" = rfe_acc,
                  "GBFE" = gbfe_acc,
@@ -3343,7 +3679,7 @@ df_long <- reshape2::melt(df,
 
 # Generate the boxplot using ggplot2
 # In ggplot2, the default whiskers also extend to 1.5*IQR from the quartiles.
-gasstation_testaccuracy_boxplot <- ggplot(df_long, aes(x = Technique, y = Accuracy)) +
+testaccuracy_boxplot <- ggplot(df_long, aes(x = Technique, y = Accuracy)) +
   geom_boxplot(fill = "lightgreen", color = "darkgreen") +
   # Add a thicker line at the mean using a crossbar
   stat_summary(fun = median, 
@@ -3376,7 +3712,7 @@ gasstation_testaccuracy_boxplot <- ggplot(df_long, aes(x = Technique, y = Accura
   theme(axis.text.x = element_text(size = 30))
 
 ggsave(filename = paste0("Figure 4_box_plot_test accuracy across five feature selection methods_", "supplier_", format(Sys.time(), "%d-%m-%Y"),".png"), 
-       plot = supplier_testaccuracy_boxplot, 
+       plot = testaccuracy_boxplot, 
        device = "png",
        dpi = 300,        # Set DPI to 600
        width = 20,       # Width in inches (adjust as needed)
@@ -3388,9 +3724,15 @@ stats::kruskal.test(list(full_features_acc, rfe_acc, gbfe_acc, sig_acc, rfa_acc)
 ## => there is no differences at all: Kruskal-Wallis chi-squared = 3.1759, df = 4, p-value = 0.5288
 ```
 
-### Find out identity of sig_selected_features
+## Sensitivity Analysis  
 ```{r , echo=FALSE, warning = FALSE, message=FALSE}
-feature_df <- data.frame(Feature = rf_results_by_gas_station_with_miscnunknown_list[[5]]$sig_selected_feats)
+# nested the feature filtering as a part of the RF classifier
+## gradient of 
+```
+
+# SI Table S5-S7: Find out identity of selected features
+```{r , echo=FALSE, warning = FALSE, message=FALSE}
+feature_df <- data.frame(Feature = rf_results_by_gas_station_with_miscnunknown_sig_rfa$rfa_selected_feats)
 
 rt1 <- c()
 rt2 <- c()
@@ -3438,6 +3780,8 @@ for(r in 1:nrow(feature_df)) {
 
 feature_df$compound_name  <- compound_name
 feature_df$Chemical_group <- chem_grp
+
+write_xlsx(feature_df, path = "RFA selected features_gas station classification.xlsx")
 ```
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
@@ -5011,87 +5355,7 @@ pairwise_significance_tests <- function(input_df,
 }
 ```
 
-# Recursive Feature Addition
-```{r class.source = 'fold-hide', echo = FALSE, message = FALSE, warning = FALSE}
-recursive_feature_addition <- function(X, y, base_features, train_proportion,
-                                       best_mtry, best_ntree, base_feature_accuracy) {
-  
-  # Ensure base features are included initially and keep data frame structure
-  base_features_train <- X[, base_features, drop = FALSE]
-  base_features_test  <- X[, base_features, drop = FALSE]
-  
-  # Define remaining features (those not in base_features)
-  remaining_feature_names <- setdiff(colnames(X), base_features)
-  remaining_features <- X[, remaining_feature_names, drop = FALSE]
-  
-  best_score_rf <- base_feature_accuracy
-  best_features_rf <- base_features
-  
-  while (ncol(remaining_features) > 0) {
-    # Combine the current base features with the remaining candidate features
-    all_features_train <- cbind(base_features_train, remaining_features)
-    
-    # Train random forest on the combined feature set
-    rf_all <- randomForest(x = all_features_train, 
-                           y = as.factor(y_train), 
-                           mtry      = best_mtry,
-                           ntree     = best_ntree,
-                           importance=TRUE)
-    
-    # Get importance scores (mean decrease in node impurity)
-    importance_scores <- importance(rf_all, type = 2)
-    
-    # Extract importance scores for only the candidate features
-    importance_remaining <- importance_scores[rownames(importance_scores) %in% colnames(remaining_features), ]
-    
-    # Rank remaining features by importance
-    ranked_features <- names(sort(importance_remaining, decreasing = TRUE))
-    
-    # Safety check: break if no candidate feature is selected
-    if (length(ranked_features) == 0) break
-    
-    # Select the candidate feature with highest importance
-    best_next_feature <- ranked_features[1]
-    
-    # Check if the feature is already present (it shouldn't be, but this is a safeguard)
-    if (!(best_next_feature %in% colnames(base_features_train))) {
-      # add that highest important feature to the base feature
-      base_features_train_temp <- cbind(base_features_train, remaining_features[, best_next_feature, drop = FALSE])
-      base_features_test_temp  <- cbind(base_features_test, X_test[, best_next_feature, drop = FALSE])
-    } else {
-      warning("Feature ", best_next_feature, " is already present in base_features_train. Skipping addition.")
-    }
-    
-    
-    
-    # Train the updated model with the new feature added
-    rf_updated <- randomForest(x = base_features_train_temp, 
-                               y = as.factor(y_train), 
-                               mtry      = best_mtry,
-                               ntree     = best_ntree,
-                               importance=TRUE)
-    
-    # Predict on the test set and calculate accuracy
-    pred_class_test <- predict(best_model, newdata=X_test, type="raw") 
-    acc_new <- mean(as.character(pred_class_test) == as.character(y_test))
-  
-    y_pred_rf <- predict(rf_updated, base_features_test_temp)
-    score_rf <- mean(y_pred_rf == y_test)
-    
-    # Add the new important feature to base feature Remove the selected feature from the candidate set
-    remaining_features <- remaining_features[, !(colnames(remaining_features) %in% best_next_feature), drop = FALSE]
-    
-    # Update the best score and feature set if the new score improves
-    if (score_rf > best_score_rf) {
-      best_score_rf <- score_rf
-      best_features_rf <- colnames(base_features_train)
-    }
-  }
-  
-  return(list(best_score_rf = best_score_rf, best_features_rf = best_features_rf))
-}
 
-```
 
 # Pair-wise test with p-value correction for multiple testing
 
