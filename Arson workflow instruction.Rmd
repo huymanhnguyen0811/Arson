@@ -1435,21 +1435,12 @@ evaluate_rf_performance <- function(data,
   X_test  <- test_data %>% dplyr::select(-c(all_of(remove_cols), all_of(type_col)))
   y_test  <- test_data[[type_col]]
   
-  min_class_count <- min(table(y_train))
-  folds <- ifelse(min_class_count > 1, min_class_count, 2)
-  cv_ctrl <- trainControl(
-    method     = "cv",
-    number     = folds,
-    classProbs = TRUE
-  )
-  
   num_features    <- ncol(X_train)
   mtry_candidates <- c(floor(sqrt(num_features)), floor(log2(num_features)))
   rf_grid         <- expand.grid(mtry = mtry_candidates)
   
   all_feats <- tune_rf_subset(
-    X_train, y_train, X_test, y_test,
-    cv_ctrl, ntree_candidates, metric
+    X_train, y_train, X_test, y_test, ntree_candidates, metric
   )
   
   eval_metrics <- all_feats$eval_metrics
@@ -1646,7 +1637,7 @@ find_best_impute_normalize_new <- function(df,
       # Use the imputed/normalized data (X_norm) and class vector y to compute test accuracy.
       df_input_test_acc <- cbind(X_norm, df[,c(type_col, remove_cols)])
 
-      acc_kappa_auc <- evaluate_rf_performance(data = df_input_test_acc,
+      performance_output <- evaluate_rf_performance(data = df_input_test_acc,
                                                type_col=type_col,
                                                remove_cols=remove_cols,
                                                train_proportion = train_proportion)
@@ -1671,6 +1662,7 @@ find_best_impute_normalize_new <- function(df,
         KS_p          = ks_p,
         CVmean       = cv_mean,
         CVstd        = cv_std,
+        sig_num = sig_num,
         TestAcc       = performance_output$Accuracy,
         Kappa = performance_output$Kappa,
         AUC = performance_output$AUC,
@@ -1685,16 +1677,17 @@ find_best_impute_normalize_new <- function(df,
   
   # Build an ordering index: primary by TestAcc, secondary by ClusterRes, etc.
   ord <- order(
-    -df_results$F1_Weighted,
-    -df_results$MCC_Multiclass,
+     -df_results$TestAcc,
      -df_results$AUC,
-    -df_results$TestAcc,
     # -df_results$F1_Macro,
     -df_results$ClusterRes,
+    -df_results$sig_num,
     # -df_results$CVmean,
     # df_results$CVstd,
     -df_results$CorrScore,   # smaller rank_corrScore = better CorrScore
-    -df_results$KS_p
+    -df_results$KS_p,
+    -df_results$F1_Weighted,
+    -df_results$MCC_Multiclass
     # -df_results$Kappa,           # smaller  = better KS_p
   )
   
@@ -2435,13 +2428,13 @@ Also, I tried to run PCA with un-normalized data (after imputation) with 3 imput
 
 ### PCA
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
-pca_input <- df_percentage
+pca_input <- data
 # p_nonunique_df %>% 
 # dplyr::select(-setdiff(colnames(p_nonunique_df[,6:ncol(p_nonunique_df)]), final_vec)) # %>% 
 # filter(gas_station %in% "Station 1")
 
 res.pca <- FactoMineR::PCA(
-  pca_input[, 6:ncol(pca_input)],
+  pca_input[, 5:ncol(pca_input)],
   scale.unit = FALSE,
   graph = FALSE)
 
@@ -2653,99 +2646,16 @@ resolutions <- c(resolutions, avg_resolution)
 print(resolutions)
 ```
 
-# Recursive Feature Addition
-```{r class.source = 'fold-hide', echo = FALSE, message = FALSE, warning = FALSE}
-recursive_feature_addition <- function(X_train, y_train,
-                                       X_test,  y_test,
-                                       cv_ctrl,
-                                       ntree_candidates,
-                                       metric) {
-  # 1) Fit full model to get initial feature importance
-  full_res <- tune_rf_subset(
-    X_train, y_train,
-    X_test,  y_test,
-    cv_ctrl, ntree_candidates, metric
-  )
-  # Extract importance from the randomForest final model
-  imp_mat <- importance(full_res$model$finalModel)
-  # Choose first top feature by MeanDecreaseAccuracy (or use MeanDecreaseGini) to use as base feature to initiate RFA
-  init_feat <- rownames(imp_mat)[which.max(imp_mat[, "MeanDecreaseAccuracy"])]
-
-  # Initialize feature sets
-  best_feats <- init_feat
-  remaining  <- setdiff(colnames(X_train), best_feats)
-
-  # 2) Baseline performance with the single top feature
-  base_res      <- tune_rf_subset(
-    X_train[, best_feats, drop = FALSE], y_train,
-    X_test [, best_feats, drop = FALSE], y_test,
-    cv_ctrl, ntree_candidates, metric
-  )
-  best_accuracy <- base_res$Accuracy
-  best_kappa    <- base_res$Kappa
-  best_auc      <- base_res$AUC
-
-  # 3) Iterative addition of remaining features
-  while(length(remaining) > 0) {
-    improved <- FALSE
-    for(feat in remaining) {
-      trial_feats <- c(best_feats, feat)
-      res <- tune_rf_subset(
-        X_train[, trial_feats, drop = FALSE], y_train,
-        X_test [, trial_feats, drop = FALSE], y_test,
-        cv_ctrl, ntree_candidates, metric
-      )
-      # Add feature only if all three metrics improve
-      if(res$Accuracy > best_accuracy &&
-         res$Kappa    > best_kappa    &&
-         res$AUC      > best_auc) {
-        best_accuracy <- res$Accuracy
-        best_kappa    <- res$Kappa
-        best_auc      <- res$AUC
-        best_feats    <- trial_feats
-        improved      <- TRUE
-        break
-      }
-    }
-    # Drop the last-tested feature from remaining
-    remaining <- setdiff(remaining, feat)
-    if(!improved) break
-  }
-
-  # 4) Final model on the chosen feature set
-  final_res <- tune_rf_subset(
-    X_train[, best_feats, drop = FALSE], y_train,
-    X_test [, best_feats, drop = FALSE], y_test,
-    cv_ctrl, ntree_candidates, metric
-  )
-
-  # 5) Return performance and selected features
-  list(
-    best_accuracy    = final_res$Accuracy,
-    best_kappa =  final_res$Kappa,
-    best_auc = final_res$AUC,
-    best_features_rf = best_feats,
-    final_model      = final_res$model,
-    prob_matrix = final_res$p_m,
-    predictions = final_res$preds,
-    eval_metrics = final_res$eval_metrics
-  )
-}
-```
-
 # RANDOM FOREST
 ```{r , echo=FALSE, warning = FALSE, message=FALSE}
-# Recursive Feature Addition -------------
 recursive_feature_addition <- function(X_train, y_train,
                                        X_test,  y_test,
-                                       cv_ctrl,
                                        ntree_candidates,
                                        metric) {
   # 1) Fit full model to get initial feature importance
   full_res <- tune_rf_subset(
     X_train, y_train,
-    X_test,  y_test,
-    cv_ctrl, ntree_candidates, metric
+    X_test,  y_test, ntree_candidates, metric
   )
   # Extract importance from the randomForest final model
   imp_mat <- importance(full_res$model$finalModel)
@@ -2760,7 +2670,7 @@ recursive_feature_addition <- function(X_train, y_train,
   base_res      <- tune_rf_subset(
     X_train[, best_feats, drop = FALSE], y_train,
     X_test [, best_feats, drop = FALSE], y_test,
-    cv_ctrl, ntree_candidates, metric
+    ntree_candidates, metric
   )
   best_accuracy <- base_res$Accuracy
   best_kappa    <- base_res$Kappa
@@ -2773,8 +2683,7 @@ recursive_feature_addition <- function(X_train, y_train,
       trial_feats <- c(best_feats, feat)
       res <- tune_rf_subset(
         X_train[, trial_feats, drop = FALSE], y_train,
-        X_test [, trial_feats, drop = FALSE], y_test,
-        cv_ctrl, ntree_candidates, metric
+        X_test [, trial_feats, drop = FALSE], y_test, ntree_candidates, metric
       )
       # Add feature only if all three metrics improve
       if(res$Accuracy > best_accuracy &&
@@ -2797,7 +2706,7 @@ recursive_feature_addition <- function(X_train, y_train,
   final_res <- tune_rf_subset(
     X_train[, best_feats, drop = FALSE], y_train,
     X_test [, best_feats, drop = FALSE], y_test,
-    cv_ctrl, ntree_candidates, metric
+    ntree_candidates, metric
   )
 
   # 5) Return performance and selected features
@@ -2816,53 +2725,106 @@ recursive_feature_addition <- function(X_train, y_train,
 #─────────────────────────────────────────────────────────────────────────────
 # Helper: retune mtry (based on subset size) + ntree for any train/test split
 tune_rf_subset <- function(X_train, y_train, X_test, y_test,
-                           cv_ctrl, ntree_candidates, metric) {
-  p <- ncol(X_train)
-  rf_grid <- expand.grid(
-    mtry = unique(pmax(1, c(floor(sqrt(p)), floor(log2(p)))))
-  )
+                           ntree_candidates, metric) {
+  # 1) Check class counts
+  k_inner <- min(table(y_train))
   
-  best_mod   <- NULL
-  best_val   <- -Inf
-  best_trees <- NA
+  # 2) Build the mtry grid
+  p        <- ncol(X_train)
+  mtry_vals <- unique(pmax(1, c(floor(sqrt(p)), floor(log2(p)))))
   
-  for(nt in ntree_candidates) {
-    set.seed(123) # set.seed(sample.int(999,1))
-    tmp <- caret::train(
-      x         = X_train,
-      y         = as.factor(y_train),
-      method    = "rf",
-      trControl = cv_ctrl,
-      tuneGrid  = rf_grid,
-      metric    = metric,
-      ntree     = nt,
-      importance= TRUE
+  # 3) Branch: enough data for CV?
+  if (k_inner > 1) {
+    # —> use caret CV
+    ctrl <- trainControl(
+      method         = "cv",
+      number         = k_inner,
+      classProbs     = TRUE,
+      summaryFunction= defaultSummary
     )
-    this_val <- max(tmp$results[[metric]])
-    if(this_val > best_val) {
-      best_val   <- this_val
-      best_mod   <- tmp
-      best_trees <- nt
+    rf_grid <- expand.grid(mtry = mtry_vals)
+    
+    best_mod   <- NULL
+    best_val   <- -Inf
+    best_trees <- NA
+    
+    for (nt in ntree_candidates) {
+      set.seed(123)
+      tmp <- caret::train(
+        x         = X_train,
+        y         = as.factor(y_train),
+        method    = "rf",
+        trControl = ctrl,
+        tuneGrid  = rf_grid,
+        metric    = metric,
+        ntree     = nt,
+        importance= TRUE
+      )
+      this_val <- max(tmp$results[[metric]])
+      if (this_val > best_val) {
+        best_val   <- this_val
+        best_mod   <- tmp
+        best_trees <- nt
+      }
     }
+    
+    caret_model <- best_mod
+    final_rf    <- caret_model$finalModel
+    
+  } else {
+    # —> too few per class: do OOB-based tuning
+    best_oob   <- Inf
+    best_mtry  <- NA
+    best_trees <- NA
+    best_rf    <- NULL
+    
+    for (nt in ntree_candidates) {
+      for (m in mtry_vals) {
+        set.seed(123)
+        rf_mod <- randomForest(
+          x          = X_train,
+          y          = as.factor(y_train),
+          mtry       = m,
+          ntree      = nt,
+          importance = TRUE
+        )
+        # final OOB error rate:
+        oob_err <- tail(rf_mod$err.rate[ , "OOB"], 1)
+        if (oob_err < best_oob) {
+          best_oob   <- oob_err
+          best_mtry  <- m
+          best_trees <- nt
+          best_rf    <- rf_mod
+        }
+      }
+    }
+    # wrap into a dummy caret-like object so that downstream calls to predict(<train>,…) and predict(<train>, type="prob") continue to work.
+    caret_model <- list(
+      finalModel = best_rf,
+      # so that later code that uses predict(<train>,…) still works:
+      methods = list(predict = "randomForest")
+    )
+    final_rf <- best_rf
   }
   
-  preds    <- predict(best_mod, newdata = X_test, type = "raw")
-  prob_matrix <- as.matrix(predict(best_mod, newdata=X_test, type="prob"))
-  
-  eval_metrics_res <- eval_metrics(true_labels = y_test, 
+  # 4) Predict & score
+  preds       <- predict(final_rf, newdata = X_test, type = "response")
+  prob_matrix <- as.matrix(predict(final_rf, newdata = X_test, type = "prob"))
+  ev          <- eval_metrics(true_labels = y_test, 
                                    prob_matrix = prob_matrix, 
                                    pred_labels = preds)
   
-  return(list(model    = best_mod,
-              ntree    = best_trees,
-              p_m = prob_matrix,
-              preds = preds,
-              eval_metrics = eval_metrics_res,
-              Accuracy = eval_metrics_res$Accuracy,
-              Kappa = eval_metrics_res$Kappa,
-              AUC = eval_metrics_res$AUC,
-              F1_Weighted = eval_metrics_res$F1_Weighted,
-              MCC          = eval_metrics_res$MCC_Multiclass
+  return(list( model        = caret_model,
+               ntree        = best_trees,
+               preds        = preds,
+               p_m          = prob_matrix,
+               eval_metrics = ev,
+               Accuracy = ev$Accuracy,
+               Kappa = ev$Kappa,
+               AUC = ev$AUC,
+               F1_Macro     = ev$F1_Macro,
+               F1_Weighted = ev$F1_Weighted,
+               MCC          = ev$MCC_Multiclass
   ))
 }
 
@@ -3094,7 +3056,6 @@ run_rf_analysis_arson <- function(data,
   train_data <- data[train_index, ]
   test_data  <- data[-train_index, ]
   
-  
   # Drop unused factor levels after splitting
   train_data[[type_col]] <- droplevels(train_data[[type_col]])
   test_data[[type_col]]  <- droplevels(test_data[[type_col]])
@@ -3104,15 +3065,6 @@ run_rf_analysis_arson <- function(data,
   y_train <- train_data[[type_col]]
   X_test  <- test_data %>% dplyr::select(-c(all_of(remove_cols), all_of(type_col)))
   y_test  <- test_data[[type_col]]
-  
-  # 4) Cross-validation control
-  min_class_count <- min(table(y_train))
-  folds <- ifelse(min_class_count > 1, min_class_count, 2)
-  cv_ctrl <- trainControl(
-    method     = "cv",
-    number     = folds,
-    classProbs = TRUE
-  )
   
   # 5) Grid for mtry
   num_features    <- ncol(X_train)
@@ -3125,7 +3077,7 @@ run_rf_analysis_arson <- function(data,
   
   all_feats <- tune_rf_subset(
     X_train, y_train, X_test, y_test,
-    cv_ctrl, ntree_candidates, metric
+    ntree_candidates, metric
   )
   
   best_model_all_feats      <- all_feats$model$finalModel
@@ -3182,7 +3134,7 @@ run_rf_analysis_arson <- function(data,
       tmp_sig <- tune_rf_subset(
         X_train[, sig_feats, drop=FALSE], y_train,
         X_test [, sig_feats, drop=FALSE], y_test,
-        cv_ctrl, ntree_candidates, metric
+        ntree_candidates, metric
       )
       acc_sig         <- tmp_sig$Accuracy
       final_sig_model <- tmp_sig$model$finalModel
@@ -3219,7 +3171,6 @@ run_rf_analysis_arson <- function(data,
     rfa_res   <- recursive_feature_addition(
       X_train, y_train,
       X_test,  y_test,
-      cv_ctrl          = cv_ctrl,
       ntree_candidates = ntree_candidates,
       metric           = metric
     )
@@ -3263,14 +3214,19 @@ run_rf_analysis_arson <- function(data,
       res <- tune_rf_subset(
         X_train = x, y_train = y,
         X_test  = x, y_test  = y,
-        cv_ctrl, ntree_candidates, metric
+        ntree_candidates, metric
       )
       res$model$finalModel
     }
+    
+    # compute the smallest class count
+    rfe_k <- min(table(train_data[[type_col]]))
+    rfe_k <- if (rfe_k > 1) rfe_k else 2
+    
     rfe_ctl <- rfeControl(
       functions   = myFuncs,
       method      = "cv",
-      number      = rfe_folds,
+      number      = rfe_k,
       saveDetails = TRUE,
       returnResamp= "final"
     )
@@ -3281,13 +3237,12 @@ run_rf_analysis_arson <- function(data,
       rfeControl = rfe_ctl
     )
     rfe_feats <- rfe_out$optVariables
-    cat("RFE feats", rfe_feats)
     
     # final retune+test on RFE set
     tmp_rfe <- tune_rf_subset(
       X_train[, rfe_feats, drop=FALSE], y_train,
       X_test[, rfe_feats, drop=FALSE], y_test,
-      cv_ctrl, ntree_candidates, metric
+      ntree_candidates, metric
     )
     acc_rfe          <- tmp_rfe$Accuracy
     final_rfe_model  <- tmp_rfe$model$finalModel
@@ -3511,6 +3466,367 @@ metadata_annotatedbyCaleb[] %>%
 ## Table S6: Pairwise
 
 ## Table S7: RFA
+```
+
+# k-fold CV - All vs. Pairwise vs. RFA vs. RFE: This k-fold cv process was done on week of 13th June 2025
+```{r , echo=FALSE, warning = FALSE, message=FALSE}
+data = input_rf
+type_col = "gas_station"
+remove_cols = c("sampling_season", "supplier", "Octane_rating")
+group_for_significance = "gas_station"
+metadata = core_metadata
+target_comp = target_comp
+start_col_index = 5
+do_rfe = TRUE
+do_sig = TRUE
+do_rfa = TRUE
+rfe_folds = 5
+ntree_candidates = c(100, 500, 1000, 2500)
+metric           = "Accuracy"
+set.seed(123)
+
+data[[type_col]] <- as.factor(data[[type_col]])
+levels(data[[type_col]]) <- make.names(levels(data[[type_col]]), unique=TRUE)
+
+# Remove single-member classes
+class_counts  <- table(data[[type_col]])
+keep_classes  <- names(class_counts[class_counts > 1])
+data          <- data[data[[type_col]] %in% keep_classes, ]
+data[[type_col]] <- droplevels(data[[type_col]])
+cat("NAs in original data:", sum(is.na(data)), "\n")
+
+data <- data %>% 
+  tibble::column_to_rownames(., "Sample_name") 
+rownames(data) <- paste0(rownames(data), "_", data$supplier)
+
+cat("\n### Screening best Imputation + Normalization combo ###\n")
+# Identify numeric columns from predictors (excluding remove_cols and target)
+numeric_cols <- names(which(sapply(data, is.numeric)))
+numeric_cols <- setdiff(numeric_cols, c(remove_cols, type_col))
+
+best_res <- find_best_impute_normalize_new(
+  data,
+  type_col = type_col,
+  remove_cols = remove_cols,
+  group_for_significance = group_for_significance, 
+  train_proportion = 0.666,
+  split_with_miscunknown_supplier = split_with_miscunknown_supplier,
+  metadata = metadata,
+  target_comp = target_comp,
+  start_col_index = start_col_index)
+cat("\n*** Summary of all combos ***\n")
+print(best_res$results_table)
+
+cat("\n*** Best combo ***\n")
+print(best_res$best_combo)
+
+best_imp  <- best_res$best_combo$Imputation
+best_norm <- best_res$best_combo$Normalization
+
+X_original   <- data[, numeric_cols, drop = FALSE]
+X_imputed    <- imputation_methods[[best_imp]](X_original)
+X_final      <- normalization_methods[[best_norm]](X_imputed)
+data[, numeric_cols] <- X_final
+
+# min_class_count_all <- min(table(data[[type_col]]))
+# ifelse(min_class_count_all > 1, min_class_count_all, 2)
+K <- 3 # try K = 3 so that each fold has 1 sample of station 10 (which only have 3 samples) 
+# K <- 10
+# stratified folds on the full target vector
+# K_folds <- createFolds(data[[type_col]], k = K, returnTrain = TRUE)
+
+## Repeated Stratified k-fold
+repeats <- 5
+K_folds <- createMultiFolds(data[[type_col]], k = K, times = repeats)
+
+res_list_5repeated3fold <- vector("list", length = K * repeats * 4) 
+conf_mat_list_5repeated3fold <- vector("list", length = K * repeats * 4) 
+selected_features_5repeated3fold <- vector("list", length = K * repeats * 4) 
+prob_matrix_5repeated3fold <- vector("list", length = K * repeats * 4) 
+y_test_and_preds_list_5repeated3fold <- vector("list", length = K * repeats)
+i <- 1
+
+for(f in seq_along(K_folds)) {
+  # split indices
+  train_idx <- K_folds[[f]]
+  test_idx  <- setdiff(seq_len(nrow(data)), train_idx)
+  
+  train_data <- data[train_idx, ]
+  test_data  <- data[test_idx, ]
+  
+  # Drop unused factor levels after splitting
+  train_data[[type_col]] <- droplevels(train_data[[type_col]])
+  test_data[[type_col]]  <- droplevels(test_data[[type_col]])
+  
+  # 6) Prepare Predictors and Response for Full-Feature Classification
+  X_train <- train_data %>% dplyr::select(-c(all_of(remove_cols), all_of(type_col)))
+  y_train <- train_data[[type_col]]
+  X_test  <- test_data %>% dplyr::select(-c(all_of(remove_cols), all_of(type_col)))
+  y_test  <- test_data[[type_col]]
+  
+  # 5) Grid for mtry
+  num_features    <- ncol(X_train)
+  mtry_candidates <- c(floor(sqrt(num_features)), floor(log2(num_features)))
+  rf_grid         <- expand.grid(mtry = mtry_candidates)
+  
+  # 6) Grid search over (mtry, ntree)
+  cat("\n### Train/test with Full original features ###\n")
+  start_time_all_feats <- Sys.time()
+  all_feats <- tune_rf_subset(
+    X_train, y_train, X_test, y_test,
+    ntree_candidates, metric
+  )
+  end_time_all_feats   <- Sys.time()
+  time_all_feats       <- as.numeric(difftime(end_time_all_feats, start_time_all_feats, units="secs"))
+  
+  res_list_5repeated3fold[[i]] <- data.frame(
+    fold   = f,
+    method = "All",
+    all_feats$eval_metrics, 
+    time = time_all_feats, 
+    num_selected_feats = ncol(X_train)
+  )
+  selected_features_5repeated3fold[[i]] <- X_train
+  
+  y_test_and_preds_list_5repeated3fold[[f]]$y_test <- y_test 
+  y_test_and_preds_list_5repeated3fold[[f]]$all_feats_preds <- all_feats$preds
+  
+  prob_matrix_5repeated3fold[[i]] <- all_feats$p_m
+  conf_mat_list_5repeated3fold[[i]] <- conf_mat_plot(y_test, all_feats$preds, 
+                                      conf_mat_title = paste0("All Features - ", 
+                                                              type_col), 
+                                      accuracy = all_feats$Accuracy); i <- i + 1
+  
+  # Significance-Based Feature Selection using pairwise tests
+  cat("\n### Train/test with Pair-wise features ###\n")
+  start_time_sig <- Sys.time()
+  pw <- pairwise_significance_tests_modified(
+    input_df        = data,
+    group_col       = group_for_significance,
+    start_col_index = start_col_index,
+    metadata        = metadata,
+    target_comp     = target_comp
+  )
+  
+  idx   <- which.max(sapply(pw$corrected,
+                            function(df) length(unique(df$Feature))))
+  feats0<- unique(pw$corrected[[idx]]$Feature)
+  sig_feats <- intersect(feats0, colnames(X_train))
+  if(length(sig_feats)>0) {
+    tmp_sig <- tune_rf_subset(
+      X_train[, sig_feats, drop=FALSE], y_train,
+      X_test [, sig_feats, drop=FALSE], y_test,
+      ntree_candidates, metric
+    )
+    end_time_sig   <- Sys.time()
+    time_sig       <- as.numeric(difftime(end_time_sig, start_time_sig, units="secs"))
+    res_list_5repeated3fold[[i]] <- data.frame(
+      fold   = f,
+      method = "Pairwise",
+      tmp_sig$eval_metrics,
+      time = time_sig, 
+      num_selected_feats = length(sig_feats)
+    )
+    selected_features_5repeated3fold[[i]] <- sig_feats
+    
+    y_test_and_preds_list_5repeated3fold[[f]]$tmp_sig_preds <- tmp_sig$preds
+    
+    prob_matrix_5repeated3fold[[i]] <- tmp_sig$p_m
+    conf_mat_list_5repeated3fold[[i]] <- conf_mat_plot(y_test, tmp_sig$preds, 
+                                        conf_mat_title = paste0("Pair-wise Significance-Based Features - ", type_col), 
+                                        accuracy = tmp_sig$Accuracy); i <- i + 1
+  }
+  
+  # Recursive Feature Addition
+  cat("\n### Train/test with RFA features ###\n")
+  start_time_rfa <- Sys.time()
+  rfa_base  <- pw
+  base_feats<- intersect(unique(rfa_base$corrected[[idx]]$Feature),
+                         colnames(X_train))
+  
+  rfa_res   <- recursive_feature_addition(
+    X_train, y_train,
+    X_test,  y_test,
+    ntree_candidates = ntree_candidates,
+    metric           = metric
+  )
+  end_time_rfa   <- Sys.time()
+  time_rfa       <- as.numeric(difftime(end_time_rfa, start_time_rfa, units="secs"))
+  
+  res_list_5repeated3fold[[i]] <- data.frame(
+    fold   = f,
+    method = "RFA",
+    rfa_res$eval_metrics,
+    time=time_rfa, 
+    num_selected_feats = length(rfa_res$best_features_rf)
+  )
+  selected_features_5repeated3fold[[i]] <- rfa_res$best_features_rf
+  
+  y_test_and_preds_list_5repeated3fold[[f]]$rfa_res_predictions <- rfa_res$predictions
+  
+  prob_matrix_5repeated3fold[[i]] <- rfa_res$prob_matrix
+  conf_mat_list_5repeated3fold[[i]] <- conf_mat_plot(y_test, 
+                                      rfa_res$predictions, 
+                                      conf_mat_title = paste0("RFA Features - ", type_col), 
+                                      accuracy = rfa_res$best_accuracy); i <- i + 1
+  
+  # RFE with hyperparams retuning
+  cat("\n### Train/test with RFE features ###\n")
+  start_time_rfe <- Sys.time()
+  myFuncs <- rfFuncs
+  myFuncs$fit <- function(x, y, first, last, ...) {
+    res <- tune_rf_subset(
+      X_train = x, y_train = y,
+      X_test  = x, y_test  = y,
+      ntree_candidates, metric
+    )
+    res$model$finalModel
+  }
+  
+  # compute the smallest class count
+  rfe_k <- min(table(train_data[[type_col]]))
+  rfe_k <- if (rfe_k > 1) rfe_k else 2
+  
+  rfe_ctl <- rfeControl(
+    functions   = myFuncs,
+    method      = "cv",
+    number      = rfe_k,
+    saveDetails = TRUE,
+    returnResamp= "final"
+  )
+  rfe_out <- rfe(
+    x          = X_train,
+    y          = y_train,
+    sizes      = seq_len(ncol(X_train)),
+    rfeControl = rfe_ctl
+  )
+  rfe_feats <- rfe_out$optVariables
+  
+  # final retune+test on RFE set
+  tmp_rfe <- tune_rf_subset(
+    X_train[, rfe_feats, drop=FALSE], y_train,
+    X_test[, rfe_feats, drop=FALSE], y_test,
+    ntree_candidates, metric
+  )
+  
+  end_time_rfe   <- Sys.time()
+  time_rfe       <- as.numeric(difftime(end_time_rfe, start_time_rfe, units="secs"))
+  
+  res_list_5repeated3fold[[i]] <- data.frame(
+    fold   = f,
+    method = "RFE",
+    tmp_rfe$eval_metrics,
+    time = time_rfe, 
+    num_selected_feats = length(rfe_feats)
+  )
+  selected_features_5repeated3fold[[i]] <- rfe_feats
+  
+  y_test_and_preds_list_5repeated3fold[[f]]$tmp_rfe_preds <- tmp_rfe$preds
+  
+  prob_matrix_5repeated3fold[[i]] <- tmp_rfe$p_m
+  conf_mat_list_5repeated3fold[[i]] <- conf_mat_plot(y_test, 
+                                      tmp_rfe$preds, 
+                                      conf_mat_title = paste0("RFE Features - ", type_col), 
+                                      accuracy = tmp_rfe$Accuracy); i <- i + 1
+}
+
+results_df <- do.call(rbind, res_list_5repeated3fold)
+
+# Summarize and compare feature selection -----------------------
+# get overall means + SDs
+summary_table <- results_df %>%
+  group_by(method) %>%
+  summarise(
+    accuracy_mean = round(mean(Accuracy), 2),
+    accuracy_sd   = round(sd(Accuracy), 2),
+    kappa_mean    = round(mean(Kappa,    na.rm=TRUE), 2),
+    kappa_sd      = round(sd(Kappa,      na.rm=TRUE), 2),
+    auc_mean      = round(mean(AUC), 2),
+    auc_sd        = round(sd(AUC), 2),
+    time_mean     = round(mean(time), 2),
+    time_sd       = round(sd(time), 2),
+    MCC_mean = round(mean(MCC_Multiclass), 2),
+    MCC_sd = round(sd(MCC_Multiclass), 2),
+    num_selected_feats_mean = mean(num_selected_feats),
+    num_selected_feats_sd   = sd(num_selected_feats)
+  )
+
+View(summary_table)
+
+# boxplot of number of selected features by method
+plot <- ggplot(results_df, aes(x=method, y=num_selected_feats)) +
+  geom_boxplot() +
+  stat_summary(fun.data = function(x) {
+    stats <- boxplot.stats(x)$stats  # stats: lower whisker, Q1, median, Q3, upper whisker
+    data.frame(ymin = stats[1], ymax = stats[1])
+  }, geom = "errorbar", width = 0.2, color = "black", linewidth = 1) +
+  # Add whisker caps at the upper whisker endpoint
+  stat_summary(fun.data = function(x) {
+    stats <- boxplot.stats(x)$stats
+    data.frame(ymin = stats[5], ymax = stats[5])
+  }, geom = "errorbar", width = 0.2, color = "black", linewidth = 1) +
+  theme_bw(base_size = 20) +
+  labs(x = "Feature selection methods", y = "Number of selected features")
+plot
+
+ggsave(filename = paste0("Figure S3_box_plot_Number of selected features across five feature selection methods_", "gasoline_", format(Sys.time(), "%d-%m-%Y"),".png"), 
+       plot = plot, 
+       device = "png",
+       dpi = 300,        # Set DPI to 600
+       width = 15,       # Width in inches (adjust as needed)
+       height = 8,       # Height in inches (adjust as needed)
+       units = "in") 
+
+# boxplot of MCC by method
+plot <- ggplot(results_df, aes(x=method, y=MCC_Multiclass)) +
+  geom_boxplot() +
+  stat_summary(fun.data = function(x) {
+    stats <- boxplot.stats(x)$stats  # stats: lower whisker, Q1, median, Q3, upper whisker
+    data.frame(ymin = stats[1], ymax = stats[1])
+  }, geom = "errorbar", width = 0.2, color = "black", linewidth = 1) +
+  # Add whisker caps at the upper whisker endpoint
+  stat_summary(fun.data = function(x) {
+    stats <- boxplot.stats(x)$stats
+    data.frame(ymin = stats[5], ymax = stats[5])
+  }, geom = "errorbar", width = 0.2, color = "black", linewidth = 1) +
+  theme_minimal(base_size = 20) +
+  labs(x = "Feature selection methods",
+       title="MCC across folds by method")
+plot
+
+# boxplot of Accuracy by method
+library(ggsignif)
+library(ggpubr)
+plot <- ggplot(results_df, aes(x=method, y=Accuracy)) +
+  geom_boxplot() +
+  stat_summary(fun.data = function(x) {
+    stats <- boxplot.stats(x)$stats  # stats: lower whisker, Q1, median, Q3, upper whisker
+    data.frame(ymin = stats[1], ymax = stats[1])
+  }, geom = "errorbar", width = 0.2, color = "black", linewidth = 1) +
+  # Add whisker caps at the upper whisker endpoint
+  stat_summary(fun.data = function(x) {
+    stats <- boxplot.stats(x)$stats
+    data.frame(ymin = stats[5], ymax = stats[5])
+  }, geom = "errorbar", width = 0.2, color = "black", linewidth = 1) +
+  geom_signif(comparisons=list(c("RFA","All"),c("RFA","Pairwise"),c("RFA","RFE")), test=t.test, test.args = list(paired = F), map_signif_level=TRUE, step_increase=0.08) +
+  theme_bw(base_size = 20) +
+  labs(x = "Feature selection methods",
+       title="Accuracy across folds by method")
+plot
+
+# reshape to wide: one row per fold, columns = methods
+wide_acc <- results_df %>%
+  select(fold, method, Accuracy) %>%
+  tidyr::pivot_wider(names_from = method, values_from = Accuracy)
+
+# stats::kruskal.test(list(wide_acc$All, wide_acc$Pairwise, wide_acc$RFA, wide_acc$RFE))
+stats::wilcox.test(wide_acc$All, wide_acc$RFA)
+# Friedman test (nonparametric, repeated measures)
+# friedman.test(as.matrix(wide_acc[,-1]))
+
+## Confusion matrix
+# Best fold for each feature selection ==> All fold, RFE fold 2; pair fold, RFA fold 1
+
 ```
 
 ####-----------------------------------------------#
