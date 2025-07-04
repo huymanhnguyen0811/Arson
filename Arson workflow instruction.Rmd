@@ -3789,7 +3789,8 @@ plot <- ggplot(results_df, aes(x=method, y=MCC_Multiclass)) +
     stats <- boxplot.stats(x)$stats
     data.frame(ymin = stats[5], ymax = stats[5])
   }, geom = "errorbar", width = 0.2, color = "black", linewidth = 1) +
-  theme_minimal(base_size = 20) +
+  geom_signif(comparisons=list(c("RFA","All"),c("RFA","Pairwise"),c("RFA","RFE")), test=t.test, test.args = list(paired = F), map_signif_level=TRUE, step_increase=0.08) +
+  theme_bw(base_size = 20) +
   labs(x = "Feature selection methods",
        title="MCC across folds by method")
 plot
@@ -3808,7 +3809,7 @@ plot <- ggplot(results_df, aes(x=method, y=Accuracy)) +
     stats <- boxplot.stats(x)$stats
     data.frame(ymin = stats[5], ymax = stats[5])
   }, geom = "errorbar", width = 0.2, color = "black", linewidth = 1) +
-  geom_signif(comparisons=list(c("RFA","All"),c("RFA","Pairwise"),c("RFA","RFE")), test=t.test, test.args = list(paired = F), map_signif_level=TRUE, step_increase=0.08) +
+  geom_signif(comparisons=list(c("RFA","All"),c("RFA","Pairwise"),c("RFA","RFE")), test=t.test, test.args = list(paired = T), map_signif_level=TRUE, step_increase=0.08) +
   theme_bw(base_size = 20) +
   labs(x = "Feature selection methods",
        title="Accuracy across folds by method")
@@ -3816,10 +3817,10 @@ plot
 
 # reshape to wide: one row per fold, columns = methods
 wide_acc <- results_df %>%
-  select(fold, method, Accuracy) %>%
-  tidyr::pivot_wider(names_from = method, values_from = Accuracy)
+  select(fold, method, MCC_Multiclass) %>%
+  tidyr::pivot_wider(names_from = method, values_from = MCC_Multiclass)
 
-# stats::kruskal.test(list(wide_acc$All, wide_acc$Pairwise, wide_acc$RFA, wide_acc$RFE))
+stats::kruskal.test(list(wide_acc$All, wide_acc$Pairwise, wide_acc$RFA, wide_acc$RFE))
 stats::wilcox.test(wide_acc$All, wide_acc$RFA)
 # Friedman test (nonparametric, repeated measures)
 # friedman.test(as.matrix(wide_acc[,-1]))
