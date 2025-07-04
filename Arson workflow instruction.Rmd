@@ -56,7 +56,8 @@ library(caret)           # for model training & cross-validation
 library(stats)           # for basic stats tests, prcomp, etc.
 library(pheatmap)
 library(viridis)
-
+library(ggsignif)
+library(ggpubr)
 # Notin function
 `%notin%` <- Negate(`%in%`)
 ```
@@ -2884,8 +2885,8 @@ eval_metrics <- function(true_labels, prob_matrix, pred_labels){
   t_i <- row_sums
   p_j <- col_sums
   c_val <- sum(diag_cm)         # sum of true positives
-  num   <- N * c_val - sum(t_i * p_j)
-  den   <- sqrt((N^2 - sum(t_i^2)) * (N^2 - sum(p_j^2)))
+  num   <- N * c_val - sum(t_i * p_j) # (TP×TN)-(FP×FN)
+  den   <- sqrt((N^2 - sum(t_i^2)) * (N^2 - sum(p_j^2))) # sqrt((TP+FP)×(TP+FN)×(TN+FP)×(TN+FN)) 
   mcc   <- ifelse(den > 0, num / den, 0)
 
   return(list(
@@ -3517,6 +3518,12 @@ best_res <- find_best_impute_normalize_new(
 cat("\n*** Summary of all combos ***\n")
 print(best_res$results_table)
 
+write_xlsx(best_res$results_table %>% 
+             mutate(across(
+               .cols = where(is.numeric),
+               .fns  = ~ round(.x, 2)
+             )), path= paste0("imp_norm_result_table_", format(Sys.time(), "%d-%m-%Y"), ".xlsx"))
+
 cat("\n*** Best combo ***\n")
 print(best_res$best_combo)
 
@@ -3586,7 +3593,7 @@ for(f in seq_along(K_folds)) {
     time = time_all_feats, 
     num_selected_feats = ncol(X_train)
   )
-  selected_features_5repeated3fold[[i]] <- X_train
+  selected_features_5repeated3fold[[i]] <- colnames(X_train)
   
   y_test_and_preds_list_5repeated3fold[[f]]$y_test <- y_test 
   y_test_and_preds_list_5repeated3fold[[f]]$all_feats_preds <- all_feats$preds
@@ -3731,6 +3738,7 @@ for(f in seq_along(K_folds)) {
 }
 
 results_df <- do.call(rbind, res_list_5repeated3fold)
+View(results_df)
 
 # Summarize and compare feature selection -----------------------
 # get overall means + SDs
@@ -3777,27 +3785,7 @@ ggsave(filename = paste0("Figure S3_box_plot_Number of selected features across 
        height = 8,       # Height in inches (adjust as needed)
        units = "in") 
 
-# boxplot of MCC by method
-plot <- ggplot(results_df, aes(x=method, y=MCC_Multiclass)) +
-  geom_boxplot() +
-  stat_summary(fun.data = function(x) {
-    stats <- boxplot.stats(x)$stats  # stats: lower whisker, Q1, median, Q3, upper whisker
-    data.frame(ymin = stats[1], ymax = stats[1])
-  }, geom = "errorbar", width = 0.2, color = "black", linewidth = 1) +
-  # Add whisker caps at the upper whisker endpoint
-  stat_summary(fun.data = function(x) {
-    stats <- boxplot.stats(x)$stats
-    data.frame(ymin = stats[5], ymax = stats[5])
-  }, geom = "errorbar", width = 0.2, color = "black", linewidth = 1) +
-  geom_signif(comparisons=list(c("RFA","All"),c("RFA","Pairwise"),c("RFA","RFE")), test=t.test, test.args = list(paired = F), map_signif_level=TRUE, step_increase=0.08) +
-  theme_bw(base_size = 20) +
-  labs(x = "Feature selection methods",
-       title="MCC across folds by method")
-plot
-
 # boxplot of Accuracy by method
-library(ggsignif)
-library(ggpubr)
 plot <- ggplot(results_df, aes(x=method, y=Accuracy)) +
   geom_boxplot() +
   stat_summary(fun.data = function(x) {
@@ -3830,215 +3818,298 @@ stats::wilcox.test(wide_acc$All, wide_acc$RFA)
 
 ```
 
-####-----------------------------------------------#
-SUPPLIER
-$time_rfe
-[1] 19448.13
-
-$eval_metrics_rfe
-$eval_metrics_rfe$Accuracy
-Accuracy 
-     0.7 
-
-$eval_metrics_rfe$Kappa
-    Kappa 
-0.5774648 
-
-$eval_metrics_rfe$AUC
-[1] 0.8833333
-
-
-$acc_rfa
-Accuracy 
-     0.8 
-
-$time_rfa
-[1] 1430.785
-
-$eval_metrics_rfa
-$eval_metrics_rfa$Accuracy
-Accuracy 
-     0.8 
-
-$eval_metrics_rfa$Kappa
-    Kappa 
-0.7260274 
-
-$eval_metrics_rfa$AUC
-[1] 0.9166667
-
-$time_sig
-[1] 9.430778
-
-$eval_metrics_sig
-$eval_metrics_sig$Accuracy
-Accuracy 
-     0.6 
-
-$eval_metrics_sig$Kappa
-    Kappa 
-0.4871795 
-
-$eval_metrics_sig$AUC
-[1] 0.8916667
-
-
-$time_full_features
-[1] 21.50568
-
-$eval_metrics_full_features
-$eval_metrics_full_features$Accuracy
-Accuracy 
-     0.4 
-
-$eval_metrics_full_features$Kappa
-    Kappa 
-0.2105263 
-
-$eval_metrics_full_features$AUC
-[1] 0.8875
-####----------------------------------------------------------------------
-GAS STATION
-
-$time_full_features
-[1] 3.690251
-
-$eval_metrics_full_features
-$eval_metrics_full_features$Accuracy
- Accuracy 
-0.5238095 
-
-$eval_metrics_full_features$Kappa
-    Kappa 
-0.4559585 
-
-$eval_metrics_full_features$AUC
-[1] 0.7839506
-
-
-$time_sig
-[1] 4.637569
-
-$eval_metrics_sig
-$eval_metrics_sig$Accuracy
- Accuracy 
-0.4285714 
-
-$eval_metrics_sig$Kappa
-    Kappa 
-0.3454545 
-
-$eval_metrics_sig$AUC
-[1] 0.7916667
-
-$acc_rfa
- Accuracy 
-0.6190476 
-
-$time_rfa
-[1] 532.4951
-
-$eval_metrics_rfa
-$eval_metrics_rfa$Accuracy
- Accuracy 
-0.6190476 
-
-$eval_metrics_rfa$Kappa
- Kappa 
-0.5625 
-
-$eval_metrics_rfa$AUC
-[1] 0.8734568
-
-$time_rfe
-[1] 1779.181
-
-$eval_metrics_rfe
-$eval_metrics_rfe$Accuracy
- Accuracy 
-0.4761905 
-
-$eval_metrics_rfe$Kappa
-    Kappa 
-0.3984375 
-
-$eval_metrics_rfe$AUC
-[1] 0.7987654
-
-## Figure 4: Boxplot of test accuracy across five feature selection methods
+## Figure 4: Boxplot of MCC across feature selection methods
 ```{r , echo=FALSE, warning = FALSE, message=FALSE}
-## box plot of accuracy for these 5 feature selection methods: -----------------------
-full_features_acc <- c()
-rfe_acc<- c()
-gbfe_acc<- c()
-sig_acc<- c()
-rfa_acc<- c()
-for (item in 1:length(rf_results_by_supplier_with_miscnunknown_list)) {
-  full_features_acc <- c(full_features_acc, rf_results_by_supplier_with_miscnunknown_list[[item]]$full_features_acc)
-  rfe_acc <- c(rfe_acc, rf_results_by_supplier_with_miscnunknown_list[[item]]$acc_rfe)
-  gbfe_acc <- c(gbfe_acc, rf_results_by_supplier_with_miscnunknown_list[[item]]$acc_gbfe)
-  sig_acc <- c(sig_acc, rf_results_by_supplier_with_miscnunknown_list[[item]]$acc_sig)
-  rfa_acc <- c(rfa_acc, rf_results_by_supplier_with_miscnunknown_list[[item]]$acc_rfa)
-}
-
-# Make data frame of prediction accuracies
-df <- data.frame("Full_features" = full_features_acc,
-                 "RFE" = rfe_acc,
-                 "GBFE" = gbfe_acc,
-                 "Pair_wise_test" = sig_acc,
-                 "RFA" = rfa_acc)
-
-# Reshape the data from wide to long format
-df_long <- reshape2::melt(df, 
-                measure.vars = c("Full_features", "RFE", "GBFE", "Pair_wise_test", "RFA"),
-                variable.name = "Technique",
-                value.name = "Accuracy")
-
-# Generate the boxplot using ggplot2
-# In ggplot2, the default whiskers also extend to 1.5*IQR from the quartiles.
-testaccuracy_boxplot <- ggplot(df_long, aes(x = Technique, y = Accuracy)) +
-  geom_boxplot(fill = "lightgreen", color = "darkgreen") +
-  # Add a thicker line at the mean using a crossbar
-  stat_summary(fun = median, 
-               geom = "crossbar", 
-               width = 0.75,      # Width of the crossbar
-               fatten = 2,        # Emphasizes the line by increasing its thickness
-               linewidth = 1.5,   # Use linewidth instead of size
-               color = "black") +   # A color to highlight the mean
-  # Add whisker caps at the lower whisker endpoint
+# boxplot of MCC by method
+plot <- ggplot(results_df, aes(x=method, y=MCC_Multiclass)) +
+  geom_boxplot() +
   stat_summary(fun.data = function(x) {
     stats <- boxplot.stats(x)$stats  # stats: lower whisker, Q1, median, Q3, upper whisker
     data.frame(ymin = stats[1], ymax = stats[1])
-  }, geom = "errorbar", width = 0.2, color = "darkgreen", linewidth = 1) +
+  }, geom = "errorbar", width = 0.2, color = "black", linewidth = 1) +
   # Add whisker caps at the upper whisker endpoint
   stat_summary(fun.data = function(x) {
     stats <- boxplot.stats(x)$stats
     data.frame(ymin = stats[5], ymax = stats[5])
-  }, geom = "errorbar", width = 0.2, color = "darkgreen", linewidth = 1) +
-  labs(
-    #title = "Boxplot of 5 Techniques",
-       x = "Feature selection method",
-       y = "Test accuracy") +
+  }, geom = "errorbar", width = 0.2, color = "black", linewidth = 1) +
+  geom_signif(comparisons=list(c("RFA","All"),c("RFA","Pairwise"),c("RFA","RFE")), test=t.test, test.args = list(paired = F), map_signif_level=TRUE, step_increase=0.08, textsize = 7, vjust = 0.5) +
   scale_y_continuous(limits = c(0, 1)) +
-  scale_x_discrete(labels = c("Full_features" = "Original features",
-                              "RFE" = "RFE",
-                              "GBFE" = "GBFE",
-                              "Pair_wise_test" = "Pair-wise test",
-                              "RFA" = "RFA")) +
-  theme_minimal(base_size = 30) + 
-  theme(axis.text.x = element_text(size = 30))
+  theme_bw(base_size = 25) +
+  labs(x = "Feature selection methods", y = "MCC score"
+       # title="MCC across folds by method"
+       )
+plot
 
-ggsave(filename = paste0("Figure 4_box_plot_test accuracy across five feature selection methods_", "supplier_", format(Sys.time(), "%d-%m-%Y"),".png"), 
-       plot = testaccuracy_boxplot, 
+ggsave(filename = paste0("Figure 4_box_plot_MCC score across feature selection methods_", format(Sys.time(), "%d-%m-%Y"),".png"), 
+       plot = plot, 
        device = "png",
        dpi = 300,        # Set DPI to 600
-       width = 20,       # Width in inches (adjust as needed)
+       width = 15,       # Width in inches (adjust as needed)
        height = 8,       # Height in inches (adjust as needed)
        units = "in") 
+```
 
-# Kruskal-Wallis Rank Sum Test - Is there different in Accuracy between these 5 feature selection methods
-stats::kruskal.test(list(full_features_acc, rfe_acc, gbfe_acc, sig_acc, rfa_acc)) #=> there is no differences at all
-## => there is no differences at all: Kruskal-Wallis chi-squared = 3.1759, df = 4, p-value = 0.5288
+## Figure 5: Confusion matrix
+```{r , echo=FALSE, warning = FALSE, message=FALSE}
+# All feats - y_test_and_preds_list_5repeated3fold[[15]] --------------------
+table(
+  Actual    = as.character(y_test_and_preds_list_5repeated3fold[[15]]$y_test),
+  Predicted = as.character(y_test_and_preds_list_5repeated3fold[[15]]$all_feats_preds)
+)
+
+# 2) Turn it into a data.frame for ggplot
+cm_df <- read_xlsx(path = "cm_template.xlsx", sheet = 2)
+
+# 3) Add total-per-row and percent-per-cell
+cm_df$Total <- NA
+cm_df$Percent <- NA
+for (label in unique(cm_df$Actual)){
+  cm_df[which(cm_df$Actual == label),]$Total <- sum(cm_df[which(cm_df$Actual == label),]$Freq)
+}
+
+cm_df <- cm_df %>%
+  dplyr::mutate(Actual = factor(Actual, levels = c("Station.1",  "Station.2",  "Station.3", "Station.4",  "Station.5",  "Station.6",  "Station.7", "Station.8", "Station.9", "Station.10"))) %>%
+  dplyr::mutate(Predicted = factor(Predicted, levels = c("Station.1",  "Station.2",  "Station.3", "Station.4",  "Station.5",  "Station.6",  "Station.7", "Station.8", "Station.9", "Station.10"))) %>%
+  dplyr::mutate(
+    Percent = round(Freq / Total * 100, 2)
+  )
+
+
+cm_df <- cm_df %>%
+  mutate(
+    Label = ifelse(Predicted == Actual,
+                   paste0(round(Percent,1),"%"),
+                   ""
+    )
+  )
+
+# 5) Plot
+conf_mat <- ggplot(cm_df, aes(x = Predicted, y = Actual, fill = Percent)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "steelblue") + #, limits = c(0,1)) +
+  geom_text(aes(label = Percent), size = 5, show.legend = FALSE) +
+  # explicitly drop any size guide, keep only the fill (Recall) legend
+  guides(size = "none") +
+  labs(
+    title = "All features",
+    # subtitle = paste0(
+    #   sprintf("Overall linking accuracy: %.2f%%\n", accuracy) 
+    # # " Recall per treated class (N=", cm_df$Total[1], 
+    # " replicates each)"
+    x = "Predicted Class",
+    y = "Actual Class",
+    fill = "Percentage of\nClassification (%)" # "Recall %"
+  ) +
+  theme_minimal(base_size = 20) +
+  theme(
+    axis.text.x  = element_text(angle = 45, hjust = 1),
+    plot.title   = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle= element_text(hjust = 0.5)
+  )
+conf_mat
+
+ggsave(filename = paste0("Figure 5_confusion matrix_All feats_", format(Sys.time(), "%d-%m-%Y"),".png"), 
+       plot = conf_mat, 
+       device = "png",
+       dpi = 300,        # Set DPI to 600
+       width = 10,       # Width in inches (adjust as needed)
+       height = 5,       # Height in inches (adjust as needed)
+       units = "in")
+
+# Pairwise -------------------------------------
+table(
+  Actual    = as.character(y_test_and_preds_list_5repeated3fold[[15]]$y_test),
+  Predicted = as.character(y_test_and_preds_list_5repeated3fold[[15]]$tmp_sig_preds)
+)
+
+# 2) Turn it into a data.frame for ggplot
+cm_df <- read_xlsx(path = "cm_template.xlsx", sheet = 3)
+
+# 3) Add total-per-row and percent-per-cell
+cm_df$Total <- NA
+cm_df$Percent <- NA
+for (label in unique(cm_df$Actual)){
+  cm_df[which(cm_df$Actual == label),]$Total <- sum(cm_df[which(cm_df$Actual == label),]$Freq)
+}
+
+cm_df <- cm_df %>%
+  dplyr::mutate(Actual = factor(Actual, levels = c("Station.1",  "Station.2",  "Station.3", "Station.4",  "Station.5",  "Station.6",  "Station.7", "Station.8", "Station.9", "Station.10"))) %>%
+  dplyr::mutate(Predicted = factor(Predicted, levels = c("Station.1",  "Station.2",  "Station.3", "Station.4",  "Station.5",  "Station.6",  "Station.7", "Station.8", "Station.9", "Station.10"))) %>%
+  mutate(
+    Percent = round(Freq / Total * 100, 2)
+  )
+
+
+cm_df <- cm_df %>%
+  mutate(
+    Label = ifelse(Predicted == Actual,
+                   paste0(round(Percent,1),"%"),
+                   ""
+    )
+  )
+
+# 5) Plot
+conf_mat <- ggplot(cm_df, aes(x = Predicted, y = Actual, fill = Percent)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "steelblue") + #, limits = c(0,1)) +
+  geom_text(aes(label = Percent), size = 5, show.legend = FALSE) +
+  # explicitly drop any size guide, keep only the fill (Recall) legend
+  guides(size = "none") +
+  labs(
+    title = "Pairwise",
+    # subtitle = paste0(
+    #   sprintf("Overall linking accuracy: %.2f%%\n", accuracy) 
+    # # " Recall per treated class (N=", cm_df$Total[1], 
+    # " replicates each)"
+    x = "Predicted Class",
+    y = "Actual Class",
+    fill = "Percentage of\nClassification (%)" # "Recall %"
+  ) +
+  theme_minimal(base_size = 20) +
+  theme(
+    axis.text.x  = element_text(angle = 45, hjust = 1),
+    plot.title   = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle= element_text(hjust = 0.5)
+  )
+conf_mat
+
+ggsave(filename = paste0("Figure 5_confusion matrix_Pairwise_", format(Sys.time(), "%d-%m-%Y"),".png"), 
+       plot = conf_mat, 
+       device = "png",
+       dpi = 300,        # Set DPI to 600
+       width = 10,       # Width in inches (adjust as needed)
+       height = 5,       # Height in inches (adjust as needed)
+       units = "in")
+
+# RFE----------------------------
+table(
+  Actual    = as.character(y_test_and_preds_list_5repeated3fold[[14]]$y_test),
+  Predicted = as.character(y_test_and_preds_list_5repeated3fold[[14]]$tmp_rfe_preds)
+)
+
+# 2) Turn it into a data.frame for ggplot
+cm_df <- read_xlsx(path = "cm_template.xlsx", sheet = 4)
+
+# 3) Add total-per-row and percent-per-cell
+cm_df$Total <- NA
+cm_df$Percent <- NA
+for (label in unique(cm_df$Actual)){
+  cm_df[which(cm_df$Actual == label),]$Total <- sum(cm_df[which(cm_df$Actual == label),]$Freq)
+}
+
+cm_df <- cm_df %>%
+  dplyr::mutate(Actual = factor(Actual, levels = c("Station.1",  "Station.2",  "Station.3", "Station.4",  "Station.5",  "Station.6",  "Station.7", "Station.8", "Station.9", "Station.10"))) %>%
+  dplyr::mutate(Predicted = factor(Predicted, levels = c("Station.1",  "Station.2",  "Station.3", "Station.4",  "Station.5",  "Station.6",  "Station.7", "Station.8", "Station.9", "Station.10"))) %>%
+  mutate(
+    Percent = round(Freq / Total * 100, 2)
+  )
+
+
+cm_df <- cm_df %>%
+  mutate(
+    Label = ifelse(Predicted == Actual,
+                   paste0(round(Percent,1),"%"),
+                   ""
+    )
+  )
+
+# 5) Plot
+conf_mat <- ggplot(cm_df, aes(x = Predicted, y = Actual, fill = Percent)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "steelblue") + #, limits = c(0,1)) +
+  geom_text(aes(label = Percent), size = 5, show.legend = FALSE) +
+  # explicitly drop any size guide, keep only the fill (Recall) legend
+  guides(size = "none") +
+  labs(
+    title = "RFE",
+    # subtitle = paste0(
+    #   sprintf("Overall linking accuracy: %.2f%%\n", accuracy) 
+    # # " Recall per treated class (N=", cm_df$Total[1], 
+    # " replicates each)"
+    x = "Predicted Class",
+    y = "Actual Class",
+    fill = "Percentage of\nClassification (%)" # "Recall %"
+  ) +
+  theme_minimal(base_size = 20) +
+  theme(
+    axis.text.x  = element_text(angle = 45, hjust = 1),
+    plot.title   = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle= element_text(hjust = 0.5)
+  )
+conf_mat
+
+ggsave(filename = paste0("Figure 5_confusion matrix_RFE_", format(Sys.time(), "%d-%m-%Y"),".png"), 
+       plot = conf_mat, 
+       device = "png",
+       dpi = 300,        # Set DPI to 600
+       width = 10,       # Width in inches (adjust as needed)
+       height = 5,       # Height in inches (adjust as needed)
+       units = "in")
+
+# RFA ------------------------------------
+table(
+  Actual    = as.character(y_test_and_preds_list_5repeated3fold[[15]]$y_test),
+  Predicted = as.character(y_test_and_preds_list_5repeated3fold[[15]]$rfa_res_predictions)
+)
+
+# 2) Turn it into a data.frame for ggplot
+cm_df <- read_xlsx(path = "cm_template.xlsx", sheet = 5)
+
+# 3) Add total-per-row and percent-per-cell
+cm_df$Total <- NA
+cm_df$Percent <- NA
+for (label in unique(cm_df$Actual)){
+  cm_df[which(cm_df$Actual == label),]$Total <- sum(cm_df[which(cm_df$Actual == label),]$Freq)
+}
+
+cm_df <- cm_df %>%
+  dplyr::mutate(Actual = factor(Actual, levels = c("Station.1",  "Station.2",  "Station.3", "Station.4",  "Station.5",  "Station.6",  "Station.7", "Station.8", "Station.9", "Station.10"))) %>%
+  dplyr::mutate(Predicted = factor(Predicted, levels = c("Station.1",  "Station.2",  "Station.3", "Station.4",  "Station.5",  "Station.6",  "Station.7", "Station.8", "Station.9", "Station.10"))) %>%
+  mutate(
+    Percent = round(Freq / Total * 100, 2)
+  )
+
+
+cm_df <- cm_df %>%
+  mutate(
+    Label = ifelse(Predicted == Actual,
+                   paste0(round(Percent,1),"%"),
+                   ""
+    )
+  )
+
+# 5) Plot
+conf_mat <- ggplot(cm_df, aes(x = Predicted, y = Actual, fill = Percent)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "steelblue") + #, limits = c(0,1)) +
+  geom_text(aes(label = Percent), size = 5, show.legend = FALSE) +
+  # explicitly drop any size guide, keep only the fill (Recall) legend
+  guides(size = "none") +
+  labs(
+    title = "RFA",
+    # subtitle = paste0(
+    #   sprintf("Overall linking accuracy: %.2f%%\n", accuracy) 
+    # # " Recall per treated class (N=", cm_df$Total[1], 
+    # " replicates each)"
+    x = "Predicted Class",
+    y = "Actual Class",
+    fill = "Percentage of\nClassification (%)" # "Recall %"
+  ) +
+  theme_minimal(base_size = 20) +
+  theme(
+    axis.text.x  = element_text(angle = 45, hjust = 1),
+    plot.title   = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle= element_text(hjust = 0.5)
+  )
+conf_mat
+
+ggsave(filename = paste0("Figure 5_confusion matrix_RFA_", format(Sys.time(), "%d-%m-%Y"),".png"), 
+       plot = conf_mat, 
+       device = "png",
+       dpi = 300,        # Set DPI to 600
+       width = 10,       # Width in inches (adjust as needed)
+       height = 5,       # Height in inches (adjust as needed)
+       units = "in")
 ```
 
 ## Sensitivity Analysis  
@@ -4049,7 +4120,7 @@ stats::kruskal.test(list(full_features_acc, rfe_acc, gbfe_acc, sig_acc, rfa_acc)
 
 # SI Table S5-S7: Find out identity of selected features
 ```{r , echo=FALSE, warning = FALSE, message=FALSE}
-feature_df <- data.frame(Feature = rf_results_by_gas_station_with_miscnunknown_sig_rfa$rfa_selected_feats)
+feature_df <- data.frame(Feature = unique(unlist(selected_features_5repeated3fold[seq(from = 4 , to = 60, by = 4)])))
 
 rt1 <- c()
 rt2 <- c()
@@ -4097,8 +4168,65 @@ for(r in 1:nrow(feature_df)) {
 
 feature_df$compound_name  <- compound_name
 feature_df$Chemical_group <- chem_grp
+View(feature_df)
 
-write_xlsx(feature_df, path = "RFA selected features_gas station classification.xlsx")
+write_xlsx(feature_df %>% 
+             mutate(across(
+               .cols = where(is.numeric),
+               .fns  = ~ round(.x, 2)
+             )), path = paste0("Table S5_RFE features_gas station classification",format(Sys.time(), "%d-%m-%Y"),".xlsx"))
+```
+
+## Figure S3: Comparison of computational time and number of selected features 
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+## Computational time
+plot <- ggplot(results_df, aes(x=method, y=time)) +
+  geom_boxplot() +
+  stat_summary(fun.data = function(x) {
+    stats <- boxplot.stats(x)$stats  # stats: lower whisker, Q1, median, Q3, upper whisker
+    data.frame(ymin = stats[1], ymax = stats[1])
+  }, geom = "errorbar", width = 0.2, color = "black", linewidth = 1) +
+  # Add whisker caps at the upper whisker endpoint
+  stat_summary(fun.data = function(x) {
+    stats <- boxplot.stats(x)$stats
+    data.frame(ymin = stats[5], ymax = stats[5])
+  }, geom = "errorbar", width = 0.2, color = "black", linewidth = 1) +
+  theme_bw(base_size = 20) +
+  labs(x = "Feature selection methods", y = "Computational time")
+plot
+
+ggsave(filename = paste0("Figure S3_box_plot_Number of selected features across five feature selection methods_", "gasoline_", format(Sys.time(), "%d-%m-%Y"),".png"), 
+       plot = plot, 
+       device = "png",
+       dpi = 300,        # Set DPI to 600
+       width = 15,       # Width in inches (adjust as needed)
+       height = 8,       # Height in inches (adjust as needed)
+       units = "in") 
+
+## Number of selected features
+plot <- ggplot(results_df, aes(x=method, y=num_selected_feats)) +
+  geom_boxplot() +
+  stat_summary(fun.data = function(x) {
+    stats <- boxplot.stats(x)$stats  # stats: lower whisker, Q1, median, Q3, upper whisker
+    data.frame(ymin = stats[1], ymax = stats[1])
+  }, geom = "errorbar", width = 0.2, color = "black", linewidth = 1) +
+  # Add whisker caps at the upper whisker endpoint
+  stat_summary(fun.data = function(x) {
+    stats <- boxplot.stats(x)$stats
+    data.frame(ymin = stats[5], ymax = stats[5])
+  }, geom = "errorbar", width = 0.2, color = "black", linewidth = 1) +
+  theme_bw(base_size = 20) +
+  labs(x = "Feature selection methods", y = "Number of selected features")
+plot
+
+ggsave(filename = paste0("Figure S3_box_plot_Number of selected features across five feature selection methods_", "gasoline_", format(Sys.time(), "%d-%m-%Y"),".png"), 
+       plot = plot, 
+       device = "png",
+       dpi = 300,        # Set DPI to 600
+       width = 15,       # Width in inches (adjust as needed)
+       height = 8,       # Height in inches (adjust as needed)
+       units = "in") 
+
 ```
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
