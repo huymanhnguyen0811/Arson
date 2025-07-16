@@ -1740,6 +1740,7 @@ metadata_annotatedbyCaleb$Chemical_group <- as.factor(metadata_annotatedbyCaleb$
 chemical_group_counts <- metadata_annotatedbyCaleb %>%
   dplyr::mutate(Chemical_group = gsub(x= Chemical_group, pattern = "unknown", replacement = "ungrouped", fixed = TRUE)) %>%
   dplyr::group_by(Chemical_group) %>%
+  # count the occurence of compounds of each chemical group in all gasoline samples
   summarise(Count = n()) %>%
   dplyr::mutate(Percentage = (Count / sum(Count)) * 100)
 
@@ -2903,10 +2904,11 @@ eval_metrics <- function(true_labels, prob_matrix, pred_labels){
 ####################################################
 conf_mat_plot <- function(y_test, preds, conf_mat_title, accuracy) {
   # 1) Compute raw counts table: rows = treated labels, cols = predicted pristine labels
-  cm_tab <- table(
-    Actual    = as.character(y_test),
-    Predicted = as.character(preds)
-  )
+  all_classes <- unique(c(levels(preds), levels(y_test)))
+  y_f <- factor(y_test,  levels = all_classes)
+  p_f <- factor(preds,  levels = all_classes)
+  
+  cm_tab <- table(Actual = y_f, Predicted = p_f)
   
   # 2) Turn it into a data.frame for ggplot
   cm_df <- as.data.frame(cm_tab, stringsAsFactors = FALSE) %>%
@@ -3044,8 +3046,8 @@ run_rf_analysis_arson <- function(data,
                                                   units="secs"))
   
   # 3) Now proceed with your normal train/test code
-  X <- data %>%
-    dplyr::select(-c(all_of(remove_cols), all_of(type_col)))
+  # X <- data %>%
+  #   dplyr::select(-c(all_of(remove_cols), all_of(type_col)))
   
   y <- data[[type_col]]
   
@@ -3518,14 +3520,14 @@ best_res <- find_best_impute_normalize_new(
 cat("\n*** Summary of all combos ***\n")
 print(best_res$results_table)
 
-write_xlsx(best_res$results_table %>% 
-             mutate(across(
-               .cols = where(is.numeric),
-               .fns  = ~ round(.x, 2)
-             )), path= paste0("imp_norm_result_table_", format(Sys.time(), "%d-%m-%Y"), ".xlsx"))
+# write_xlsx(best_res$results_table %>% 
+#              mutate(across(
+#                .cols = where(is.numeric),
+#                .fns  = ~ round(.x, 2)
+#              )), path= paste0("imp_norm_result_table_", format(Sys.time(), "%d-%m-%Y"), ".xlsx"))
 
-cat("\n*** Best combo ***\n")
-print(best_res$best_combo)
+# cat("\n*** Best combo ***\n")
+# print(best_res$best_combo)
 
 best_imp  <- best_res$best_combo$Imputation
 best_norm <- best_res$best_combo$Normalization
