@@ -28,7 +28,3 @@ this repo.
 ## PCA
 
 Further details on the package and PCA functions used can be found in folder demo analysis, under the following files: demo analysis_stats_RQ1 & RQ2.R and demo_analysis_PCA_RQ1 & RQ2.R
-
-    ## [1] "Number of significant compounds with adjusted p-value < 0.05 = 75"
-
-    ## [1] "Number of significant compounds adjusted p-value < 0.1 = 94"
