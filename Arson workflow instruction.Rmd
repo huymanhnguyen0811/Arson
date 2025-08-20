@@ -220,7 +220,7 @@ hist(as.numeric(bm_df$RT2),
 ```
 
 
-# QUALITY CONTROL OF STEP 1.2B: Plot number of peak remains after removal of limit observation with Percentage coverage after removal of limit observation (on top of each bar)
+# Figure 1 - QUALITY CONTROL OF STEP 1.2B: Plot number of peak remains after removal of limit observation with Percentage coverage after removal of limit observation (on top of each bar)
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 # Calculate the mean/median percentage of all sample in df_step1.2
@@ -257,30 +257,32 @@ df <- data.frame(list(thres = c(seq(from = 0, to = 1000000, by = 50000)), remain
 plot <- ggplot(data = df,
                aes(x = thres, y = remain)) +
   geom_col(fill = "skyblue") +
-  geom_text(aes(label = round(remain, digits = 0)), color = "black", angle = 90, hjust = 1.5, size = 7) +
+  geom_text(aes(label = round(remain, digits = 0)), color = "black", 
+            angle = 90, hjust = 1.5, size = 9) +
   geom_text(aes(label = paste0(round(coverage_list, digits =1),"%"), 
                 y = remain + 5),  # Adjust 'y = remain + 5' for positioning above bars
-            color = "black", size = 7, vjust = 0) +     # Adjust vjust for fine-tuning
+            color = "black", size = 9, vjust = 0) +     # Adjust vjust for fine-tuning
   scale_x_continuous(breaks = seq(from = 0, to = 1000000, by = 50000),
                      # remove space between plotted data and xy-axes
                      expand = c(0,0)) +
   # scale_y_continuous(breaks = seq(from = 0, to = 100, by = 25), 
   #                    # remove space between plotted data and xy-axes
   #                    expand = c(0,0)) +
-  theme_classic(base_size = 20) +
-  theme(axis.text.x = element_text(size = 20, angle = 90, vjust = 0.5),
-        axis.text.y = element_text(size = 20),
+  theme_classic(base_size = 25) +
+  theme(axis.text.x = element_text(size = 25, angle = 90, vjust = 0.5),
+        axis.text.y = element_text(size = 25),
         strip.text = element_text(size = 30, face = "bold"),   # Make facet label text bold
         strip.background = element_blank()) +
-  labs(x = "Threshold of removal for limit observations", 
-       y = "Number of peak remains after removal of limit observation") 
+  labs(x = "Stepwise thresholds of peak area for removal of compounds with low signal to noise", 
+       y = "Number of peak remains after applying thresholds of peak area") 
+plot
 
-ggsave(filename = paste0("Number of compound remain & Percentage coverage", format(Sys.time(), "%d-%m-%Y"),".png"), 
+ggsave(filename = paste0("Figure 1_Number of compound remain & Percentage coverage_", format(Sys.time(), "%d-%m-%Y"),".png"), 
        plot = plot, 
        device = "png",
-       dpi = 600,        # Set DPI to 600
-       width = 20,       # Width in inches (adjust as needed)
-       height = 10,       # Height in inches (adjust as needed)
+       dpi = 300,        # Set DPI to 600
+       width = 25,       # Width in inches (adjust as needed)
+       height = 12,       # Height in inches (adjust as needed)
        units = "in")
 
 
@@ -1931,7 +1933,7 @@ plot1 <- ggplot(data_long,
              aes(x = Value, y = gas_station, fill = Chemical_group)) +
   geom_col(position = "fill") +
   scale_x_continuous(labels = scales::percent_format()) +
-  labs(x = "", y = "", fill = "Chemical Group") +
+  labs(x = NULL, y = NULL, fill = "Chemical Group") +
   theme_minimal(base_size = 25) +
   theme(
     axis.ticks.length.y = unit(0, "cm"),
@@ -2054,7 +2056,7 @@ plot2 <- ggplot(plotdf2,
              aes(x = Value, y = gas_station, fill = Chemical_group)) +
   geom_col(position = "fill") +
   scale_x_continuous(labels = scales::percent_format()) +
-  labs(x = "Proportion of total peak area (%)", y = "Gas Station", fill = "Chemical Group") +
+  labs(x = NULL, y = NULL, fill = "Chemical Group") +
   theme_minimal(base_size = 25) +
   theme(
     axis.ticks.length.y = unit(0, "cm"),
@@ -2069,7 +2071,7 @@ legend <- cowplot::get_legend(ggplot(plotdf2,
              aes(x = Value, y = gas_station, fill = Chemical_group)) +
   geom_col(position = "fill") +
   scale_x_continuous(labels = scales::percent_format()) +
-  labs(x = "", y = "", fill = "Chemical Group") +
+  labs(x = NULL, y = NULL, fill = "Chemical Group") +
   theme_minimal(base_size = 25) +
   theme(
     axis.ticks.length.y = unit(0, "cm"),
@@ -2079,10 +2081,10 @@ legend <- cowplot::get_legend(ggplot(plotdf2,
     panel.grid.minor.x = element_blank(), legend.position = "right"
   ))
 
-y <- textGrob("Gas Station", rot = 90, gp = gpar(fontsize = 20))
-x <- textGrob("Proportion of total peak area (%)", gp = gpar(fontsize = 20))
+y <- textGrob("Gas Station", rot = 90, gp = gpar(fontsize = 25))
+x <- textGrob("Proportion of total peak area (%)", gp = gpar(fontsize = 25))
 
-figure3 <- grid.arrange(plot1, plot2, ncol = 2, widths = c(1,1), right = legend) #, left = y, bottom = x)
+figure3 <- grid.arrange(plot1, plot2, ncol = 2, widths = c(1,1), right = legend, left = y, bottom = x)
 figure3
 
 # Plotting
