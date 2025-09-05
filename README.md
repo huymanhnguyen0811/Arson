@@ -183,7 +183,7 @@ Typical outputs include:
 
 If you build on this work, please cite the manuscript (title below; year/journal TBD):
 
-> Nguyen et al. **“The Use of Computational Fingerprinting Techniques to Distinguish Sources of Accelerants Used in Wildfire Arson.”**
+> Nguyen et al. **“An open-access computational fingerprinting workflow for source classifications of neat gasoline using GC×GC-TOFMS and Machine Learning”**
 
 ---
 
