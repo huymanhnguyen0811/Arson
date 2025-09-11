@@ -220,7 +220,7 @@ hist(as.numeric(bm_df$RT2),
 ```
 
 
-# Figure 1 - QUALITY CONTROL OF STEP 1.2B: Plot number of peak remains after removal of limit observation with Percentage coverage after removal of limit observation (on top of each bar)
+# Figure S1 - QUALITY CONTROL OF STEP 1.2B: Plot number of peak remains after removal of limit observation with Percentage coverage after removal of limit observation (on top of each bar)
 
 ```{r, echo = FALSE, message = FALSE, warning = FALSE}
 # Calculate the mean/median percentage of all sample in df_step1.2
@@ -273,8 +273,8 @@ plot <- ggplot(data = df,
         axis.text.y = element_text(size = 25),
         strip.text = element_text(size = 30, face = "bold"),   # Make facet label text bold
         strip.background = element_blank()) +
-  labs(x = "Stepwise thresholds of peak area for removal of compounds with low signal to noise", 
-       y = "Number of peak remains after applying thresholds of peak area") 
+  labs(x = "Stepwise threshold of peak area for removal of compounds with low signal to noise", 
+       y = "Number of peaks remains after applying thresholds of peak area") 
 plot
 
 ggsave(filename = paste0("Figure 1_Number of compound remain & Percentage coverage_", format(Sys.time(), "%d-%m-%Y"),".png"), 
@@ -1729,7 +1729,7 @@ final_cleandf_RFE <- cbind(df_percentage[, c(1,2,3,4,5)],
                                   dplyr::select(rfe_important_features)) 
 ```
 
-# Figure 1. Two subplots 
+# Figure 2. Two subplots 
 ** left-subplot: percentage composition of chemical group in metadata; 
 ** right-subplot: horizontal stacked bar plot of signal intensity across gas stations of each chemical group in metadata
 ```{r class.source = 'fold-hide', echo = FALSE, message = FALSE, warning = FALSE}
@@ -1820,10 +1820,21 @@ p2 <- ggplot(data_long,
   #       legend.position = "none")
 p2
 
-# Combine plots using gridExtra
-figure2 <- grid.arrange(p1, p2, ncol = 2, widths = c(1,2))
+library(cowplot)
+figure2 <- plot_grid(
+    p1, p2,
+    labels = c("A)", "B)"),
+    label_fontface = "bold",
+    label_size = 25,
+    label_x = c(0.01, 0.01),
+    label_y = c(0.99, 0.99),
+    ncol = 2,
+    rel_widths = c(1, 2)
+)
+
 figure2
-ggsave(filename = paste0("figure1_", format(Sys.time(), "%d-%m-%Y"),".png"), 
+
+ggsave(filename = paste0("figure2_", format(Sys.time(), "%d-%m-%Y"),".png"), 
        plot = figure2, 
        device = "png",
        dpi = 600,        # Set DPI to 600
@@ -2100,6 +2111,25 @@ legend <- cowplot::get_legend(ggplot(plotdf2,
 
 y <- textGrob("Gas Station", rot = 90, gp = gpar(fontsize = 25))
 x <- textGrob("Proportion of total peak area (%)", gp = gpar(fontsize = 25))
+
+# Put "A)" and "B)" in the top-left of each subplot
+tag_size <- 27  # same as your base_size
+
+plot1 <- plot1 +
+  labs(tag = "A)") +
+  theme(
+    plot.tag = element_text(face = "bold", size = tag_size),
+    plot.tag.position = c(0.02, 0.98),
+    legend.position = "none"  # (optional) hide legend in this panel
+  )
+
+plot2 <- plot2 +
+  labs(tag = "B)") +
+  theme(
+    plot.tag = element_text(face = "bold", size = tag_size),
+    plot.tag.position = c(0.02, 0.98),
+    legend.position = "none"  # (optional) hide legend in this panel
+  )
 
 figure3 <- grid.arrange(plot1, plot2, ncol = 2, widths = c(1,1), right = legend, left = y, bottom = x)
 figure3
