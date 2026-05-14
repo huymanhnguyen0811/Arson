@@ -18,8 +18,6 @@ This repo accompanies the manuscript:
 - **R**: 4.3.1 (or newer recommended)
 - **RStudio**: 2023.06.0+421 “Mountain Hydrangea” (or newer)
 
-> Other platforms should work, but you may need to adapt installation steps (e.g., for `lightgbm`).
-
 ---
 
 ## 📦 R packages
